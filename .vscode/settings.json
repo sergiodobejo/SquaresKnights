@@ -1,0 +1,5 @@
+{
+  "scm.diffDecorations": "none",
+  "editor.inlineSuggest.enabled": false,
+  "github.copilot.inlineSuggest.enable": false
+}

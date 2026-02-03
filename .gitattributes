@@ -1,0 +1,30 @@
+# Normalize text files to LF in the repo to avoid noisy diffs on Windows.
+# Git will checkout using LF for these, regardless of core.autocrlf.
+
+* text=auto
+
+# Source files
+*.luau text eol=lf
+*.lua  text eol=lf
+
+# Config / data
+*.json text eol=lf
+*.toml text eol=lf
+*.txt  text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Common binaries (just in case they ever get added)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.mp3  binary
+*.ogg  binary
+*.wav  binary
+*.fbx  binary
+*.rbxl binary
+*.rbxlx binary
+*.rbxm binary
+*.rbxmx binary

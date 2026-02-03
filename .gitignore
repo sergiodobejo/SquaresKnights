@@ -1,0 +1,15 @@
+# Roblox place/model binaries (generated)
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+
+# Roblox Studio lock files
+*.rbxl.lock
+*.rbxlx.lock
+
+# Rojo sourcemap (generated)
+sourcemap.json
+
+# Aftman installs tools here
+.aftman/
