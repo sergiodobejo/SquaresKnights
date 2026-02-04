@@ -8,6 +8,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local NpcSpawnService = require(ServerScriptService.Services.NpcSpawnService)
+local GridCellSpawnService = require(ServerScriptService.Services.GridCellSpawnService)
 
 
 local function findItemByDevProductId(productId: number)
@@ -45,13 +46,17 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	local unitKind = cfg.UnitKind
 	local unitClass = cfg.UnitClass
 
-	if type(npcModelName) == "string" and npcModelName ~= "" then
-		NpcSpawnService.SpawnUnitNearPlayer(player, npcModelName)
-	elseif type(unitKind) == "string" and unitKind ~= "" and type(unitClass) == "string" and unitClass ~= "" then
-		NpcSpawnService.SpawnUnitNearPlayer(player, unitKind, unitClass)
-	else
-		warn("[ProcessReceiptHandler] Invalid NPC config for item:", itemName)
-		return Enum.ProductPurchaseDecision.NotProcessedYet
+	local ok = GridCellSpawnService.TrySpawnShopItemOnCurrentCell(player, itemName)
+	if not ok then
+		-- Fallback: never block a Robux grant.
+		if type(npcModelName) == "string" and npcModelName ~= "" then
+			NpcSpawnService.SpawnUnitNearPlayer(player, npcModelName)
+		elseif type(unitKind) == "string" and unitKind ~= "" and type(unitClass) == "string" and unitClass ~= "" then
+			NpcSpawnService.SpawnUnitNearPlayer(player, unitKind, unitClass)
+		else
+			warn("[ProcessReceiptHandler] Invalid NPC config for item:", itemName)
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
 	end
 	print(string.format(
 		"[ProcessReceiptHandler] SOLD for ROBUX player=%s productId=%d item=%s NpcModelName=%s UnitKind=%s UnitClass=%s",

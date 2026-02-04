@@ -4,18 +4,11 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not Remotes then
-	Remotes = Instance.new("Folder")
-	Remotes.Name = "Remotes"
-	Remotes.Parent = ReplicatedStorage
-end
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local PromptDevProduct = Remotes:WaitForChild("PromptDevProduct")
 
-local PromptDevProduct = Remotes:FindFirstChild("PromptDevProduct")
-if not PromptDevProduct then
-	PromptDevProduct = Instance.new("RemoteEvent")
-	PromptDevProduct.Name = "PromptDevProduct"
-	PromptDevProduct.Parent = Remotes
+if not PromptDevProduct:IsA("RemoteEvent") then
+	error("[ShopDevProductHandler] ReplicatedStorage.Remotes.PromptDevProduct must be a RemoteEvent")
 end
 
 PromptDevProduct.OnServerEvent:Connect(function(player, devId)

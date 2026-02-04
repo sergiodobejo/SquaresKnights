@@ -43,8 +43,10 @@ end
 
 local ALL_COLORS = collectColorNames()
 local COLOR_TO_TEAM_ID: { [string]: number } = {}
+local TEAM_ID_TO_COLOR_NAME: { [number]: string } = {}
 for i, name in ipairs(ALL_COLORS) do
 	COLOR_TO_TEAM_ID[name] = i
+	TEAM_ID_TO_COLOR_NAME[i] = name
 end
 
 local availableColors: { string } = table.clone(ALL_COLORS)
@@ -58,6 +60,17 @@ end
 
 function Shared.GetTeamIdForColor(colorName: string): number?
 	return COLOR_TO_TEAM_ID[colorName]
+end
+
+function Shared.GetColorForTeamId(teamId: any): string?
+	if type(teamId) ~= "number" then
+		return nil
+	end
+	local id = math.floor(teamId)
+	if id <= 0 then
+		return nil
+	end
+	return TEAM_ID_TO_COLOR_NAME[id]
 end
 
 function Shared.GetColorForPlayer(player: Player): string?

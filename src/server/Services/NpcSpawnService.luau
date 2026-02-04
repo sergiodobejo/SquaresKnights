@@ -164,7 +164,7 @@ end
 
 local NpcSpawnService = {}
 
-function NpcSpawnService.SpawnUnitNearPlayer(player: Player, a: any, b: any?): Model?
+local function resolveTemplate(a: any, b: any?): (Model?, string?, string?, string?)
 	local template: Model? = nil
 	local npcModelName: string? = nil
 	local unitKind: string? = nil
@@ -182,27 +182,14 @@ function NpcSpawnService.SpawnUnitNearPlayer(player: Player, a: any, b: any?): M
 		template = findNpcTemplate(kind, class)
 	end
 
-	if not template then
-		warn(string.format(
-			"[NpcSpawnService] No NPC template found for NpcModelName=%s UnitKind=%s UnitClass=%s",
-			tostring(npcModelName),
-			tostring(unitKind),
-			tostring(unitClass)
-		))
-		return nil
-	end
+	return template, npcModelName, unitKind, unitClass
+end
 
-	local spawnPosition = getSpawnPositionNearPlayer(player)
-	if not spawnPosition then
-		return nil
-	end
-
+local function spawnCloneForPlayer(player: Player, template: Model, targetCFrame: CFrame): Model
 	local clone = template:Clone()
 	applyNpcUnitTextureForPlayer(clone, player)
 	Affiliation.StampNpc(clone, player.UserId, Affiliation.GetTeamIdForPlayer(player))
 
-	local yaw = math.rad(math.random(0, 359))
-	local targetCFrame = CFrame.new(spawnPosition) * CFrame.Angles(0, yaw, 0)
 	pcall(function()
 		clone:PivotTo(targetCFrame)
 	end)
@@ -248,6 +235,66 @@ function NpcSpawnService.SpawnUnitNearPlayer(player: Player, a: any, b: any?): M
 	end
 
 	return clone
+end
+
+function NpcSpawnService.SpawnUnitNearPlayer(player: Player, a: any, b: any?): Model?
+	local template, npcModelName, unitKind, unitClass = resolveTemplate(a, b)
+
+	if not template then
+		warn(string.format(
+			"[NpcSpawnService] No NPC template found for NpcModelName=%s UnitKind=%s UnitClass=%s",
+			tostring(npcModelName),
+			tostring(unitKind),
+			tostring(unitClass)
+		))
+		return nil
+	end
+
+	local spawnPosition = getSpawnPositionNearPlayer(player)
+	if not spawnPosition then
+		return nil
+	end
+
+	local yaw = math.rad(math.random(0, 359))
+	local targetCFrame = CFrame.new(spawnPosition) * CFrame.Angles(0, yaw, 0)
+	return spawnCloneForPlayer(player, template, targetCFrame)
+end
+
+-- Spawn at an explicit world position (center of a grid cell, etc.).
+-- Usage:
+--   SpawnUnitAtPosition(player, npcModelName, position)
+--   SpawnUnitAtPosition(player, unitKind, unitClass, position)
+function NpcSpawnService.SpawnUnitAtPosition(player: Player, a: any, b: any, c: any?): Model?
+	local position: Vector3? = nil
+	local argA = a
+	local argB = b
+
+	if typeof(b) == "Vector3" and c == nil then
+		position = b
+		argB = nil
+	elseif typeof(c) == "Vector3" then
+		position = c
+	end
+
+	if not position then
+		warn("[NpcSpawnService] SpawnUnitAtPosition called without a Vector3 position")
+		return nil
+	end
+
+	local template, npcModelName, unitKind, unitClass = resolveTemplate(argA, argB)
+	if not template then
+		warn(string.format(
+			"[NpcSpawnService] No NPC template found for NpcModelName=%s UnitKind=%s UnitClass=%s",
+			tostring(npcModelName),
+			tostring(unitKind),
+			tostring(unitClass)
+		))
+		return nil
+	end
+
+	local yaw = math.rad(math.random(0, 359))
+	local targetCFrame = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	return spawnCloneForPlayer(player, template, targetCFrame)
 end
 
 return NpcSpawnService

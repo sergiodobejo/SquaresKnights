@@ -63,7 +63,7 @@ return {
 			MoveSpeed = 16,
 		} :: WarriorCombatStats,
 		Swordsman = {
-			AttackRange = 5,
+			AttackRange = 15,
 			Damage = 18,
 			Health = 95,
 			MoveSpeed = 16,

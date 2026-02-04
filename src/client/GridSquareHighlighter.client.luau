@@ -3,12 +3,10 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- We treat the Baseplate "checker" as a texture grid.
--- In this place, 1 visible texture cell ~= 4 studs, and we want to highlight a 2x2 block of such cells.
-local TEXTURE_CELL_SIZE_STUDS = 4
-local SQUARE_CELLS = 2
-local SQUARE_SIZE = SQUARE_CELLS * TEXTURE_CELL_SIZE_STUDS
+local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+local SQUARE_SIZE = GridCells.SQUARE_SIZE_STUDS
 
 local OUTLINE_HEIGHT = 0.12
 local EDGE_WIDTH = 0.22
@@ -16,6 +14,24 @@ local HEIGHT_OFFSET = 0.02
 
 local COLOR = Color3.fromRGB(0, 255, 170)
 local TRANSPARENCY = 0.25
+
+local occupancyFolder: Folder? = nil
+
+local function isCellBlocked(cellKey: string): boolean
+	if not occupancyFolder or not occupancyFolder:IsDescendantOf(ReplicatedStorage) then
+		local inst = ReplicatedStorage:FindFirstChild("CellOccupancy")
+		if inst and inst:IsA("Folder") then
+			occupancyFolder = inst
+		else
+			occupancyFolder = nil
+			return false
+		end
+	end
+	if not occupancyFolder then
+		return false
+	end
+	return occupancyFolder:FindFirstChild(cellKey) ~= nil
+end
 
 local function findBaseplate(): BasePart?
 	local inst = Workspace:FindFirstChild("Baseplate")
@@ -84,26 +100,25 @@ local function update()
 		return
 	end
 
-	local localPos = baseplate.CFrame:PointToObjectSpace(hrp.Position)
-	local halfX = baseplate.Size.X / 2
-	local halfZ = baseplate.Size.Z / 2
-
-	local x = localPos.X + halfX
-	local z = localPos.Z + halfZ
-
-	if x < 0 or x >= baseplate.Size.X or z < 0 or z >= baseplate.Size.Z then
+	local ix, iz = GridCells.GetCellIndexFromWorld(baseplate, hrp.Position)
+	if ix == nil or iz == nil then
 		setVisible(false)
 		return
 	end
 
-	local ix = math.floor(x / SQUARE_SIZE)
-	local iz = math.floor(z / SQUARE_SIZE)
+	local cellKey = GridCells.GetCellKey(ix, iz)
+	if isCellBlocked(cellKey) then
+		setVisible(false)
+		return
+	end
 
 	if ix ~= lastIx or iz ~= lastIz or baseplate ~= lastBaseplate then
 		lastIx = ix
 		lastIz = iz
 		lastBaseplate = baseplate
 
+		local halfX = baseplate.Size.X / 2
+		local halfZ = baseplate.Size.Z / 2
 		local xCenter = -halfX + (ix * SQUARE_SIZE) + (SQUARE_SIZE / 2)
 		local zCenter = -halfZ + (iz * SQUARE_SIZE) + (SQUARE_SIZE / 2)
 		local half = SQUARE_SIZE / 2

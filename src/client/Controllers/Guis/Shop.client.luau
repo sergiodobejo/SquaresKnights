@@ -1,10 +1,12 @@
 -- PATH: StarterPlayer.StarterPlayerScripts.Controllers.Guis.Shop
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local GuiController = require(script.Parent.Parent.GuiController)
 local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local FormatNumber = require(ReplicatedStorage.Libs.FormatNumber.Simple)
 local NpcIconRenderer = require(script.Parent.Parent:WaitForChild("NpcIconRenderer"))
+local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local BuyItemRemote = Remotes:WaitForChild("BuyItem")
 local PromptDevProductRemote = Remotes:FindFirstChild("PromptDevProduct")
@@ -25,6 +27,66 @@ local Shared = {}
 
 local started = false
 
+local occupancyFolder: Folder? = nil
+
+local function getBaseplate(): BasePart?
+	local inst = workspace:FindFirstChild("Baseplate")
+	if inst and inst:IsA("BasePart") then
+		return inst
+	end
+	return nil
+end
+
+local function getRootPart(character: Model?): BasePart?
+	if not character then
+		return nil
+	end
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp
+	end
+	return nil
+end
+
+local function ensureOccupancyFolder(): Folder?
+	if occupancyFolder and occupancyFolder:IsDescendantOf(ReplicatedStorage) then
+		return occupancyFolder
+	end
+	local inst = ReplicatedStorage:FindFirstChild("CellOccupancy")
+	if inst and inst:IsA("Folder") then
+		occupancyFolder = inst
+		return occupancyFolder
+	end
+	occupancyFolder = nil
+	return nil
+end
+
+local function getCurrentCellKeyUnderPlayer(): string?
+	local player = Players.LocalPlayer
+	local baseplate = getBaseplate()
+	local root = getRootPart(player.Character)
+	if not baseplate or not root then
+		return nil
+	end
+	local ix, iz = GridCells.GetCellIndexFromWorld(baseplate, root.Position)
+	if ix == nil or iz == nil then
+		return nil
+	end
+	return GridCells.GetCellKey(ix, iz)
+end
+
+local function isCurrentCellBlocked(): boolean
+	local key = getCurrentCellKeyUnderPlayer()
+	if not key then
+		return true
+	end
+	local folder = ensureOccupancyFolder()
+	if not folder then
+		return false
+	end
+	return folder:FindFirstChild(key) ~= nil
+end
+
 function Shared.OnStart()
 	if started then
 		return
@@ -38,7 +100,16 @@ function Shared.OnStart()
 end
 
 function Local.UpdateEnabled()
-	Gui.Enabled = not Gui.Enabled
+	local nextEnabled = not Gui.Enabled
+	if nextEnabled then
+		-- Cannot open shop while standing on an occupied (or non-grid) cell.
+		if isCurrentCellBlocked() then
+			warn("[Shop] Cannot open shop: cell is occupied/reserved (or you are not on the grid)")
+			Gui.Enabled = false
+			return
+		end
+	end
+	Gui.Enabled = nextEnabled
 end
 
 local function findNpcTemplate(unitKind: any, unitClass: any): Model?
@@ -187,6 +258,12 @@ function Local.GenerateBuffButtons()
 		end
 
 		button.Buy.MouseButton1Click:Connect(function()
+			-- Close shop immediately on selection.
+			Gui.Enabled = false
+			if isCurrentCellBlocked() then
+				warn("[Shop] Cannot spawn here: cell is occupied/reserved")
+				return
+			end
 			BuyItemRemote:FireServer(name)
 		end)
 

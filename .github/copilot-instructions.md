@@ -63,8 +63,11 @@ Scripts consume them similarly (though Rojo/Luau module semantics differ slightl
 
 #### Important: Remotes folder policy (Rojo)
 - DO NOT add a `Remotes` folder under `src/` (or map it in `default.project.json`). Rojo syncing a `Remotes` folder can overwrite existing Remotes created/managed in Roblox Studio.
-- Prefer creating/ensuring RemoteEvents at runtime on the server ("getOrCreate" into `ReplicatedStorage`) and consuming them from client/server code.
-- If runtime creation is not feasible, instruct the user to create the required RemoteEvent manually in Studio, including the exact name and location.
+
+**Strict rule (do this always):**
+- Do NOT create the `Remotes` folder or any `RemoteEvent`/`RemoteFunction` in code (no runtime “getOrCreate”).
+- If a Remote is required, you MUST tell the user the exact name + location to create it in Roblox Studio (e.g. `ReplicatedStorage/Remotes/BuyItem`), and you MUST get explicit confirmation that it was created before proceeding.
+- Never map `Remotes` via Rojo.
 
 ## Development Guidelines
 
