@@ -18,7 +18,8 @@ local function collectColorNames(): { string }
 		end
 	end
 
-	local preferredOrder = { "red", "blue", "yellow", "black" }
+	-- NOTE: "blue" is reserved for AI NPCs; remove from available player colors
+	local preferredOrder = { "red", "yellow", "black", "white", "tan", "purple", "pink", "green", "brown" }
 	local preferredSet = {}
 	for _, name in ipairs(preferredOrder) do
 		preferredSet[name] = true

@@ -2,7 +2,7 @@
 --
 -- Ensures NPCs placed under Workspace/NPC (including nested subfolders)
 -- behave like spawned NPCs:
--- - have a positive TeamId so they participate in NPC-vs-NPC combat logic
+-- - (disabled) do NOT stamp a TeamId: avoids NPC-vs-NPC combat for Workspace/NPC rigs
 -- - are tracked for damage popups
 
 local Workspace = game:GetService("Workspace")
@@ -11,9 +11,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local NpcDamagePopupService = require(ServerScriptService.Services:WaitForChild("NpcDamagePopupService"))
-
--- Player team ids are assigned from TeamTextures (1..N). Use a high value to avoid collisions.
-local AI_TEAM_ID = 999
 
 local initialized: { [Model]: boolean } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -42,14 +39,11 @@ local function tryInitNpcModel(model: Model)
 
 	initialized[model] = true
 
-	-- Stamp AI team only if the NPC is currently unaffiliated.
-	local currentTeamId = Affiliation.GetTeamIdFromModel(model)
-	if currentTeamId <= 0 then
-		Affiliation.StampNpc(model, 0, AI_TEAM_ID)
-		pcall(function()
-			model:SetAttribute("IsAiNpc", true)
-		end)
-	end
+	-- Combat participation for Workspace/NPC is intentionally disabled for now.
+	-- Keep any existing TeamId if it was set elsewhere, but never stamp one here.
+	pcall(function()
+		model:SetAttribute("IsAiNpc", true)
+	end)
 
 	NpcDamagePopupService.TrackNpc(model)
 end
