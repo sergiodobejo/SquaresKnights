@@ -34,6 +34,8 @@ local npcDamagePopupRemote = getOrCreateRemoteEvent(remotesFolder, RemoteNames.N
 local lastHealthByNpc: { [Model]: number } = setmetatable({}, { __mode = "k" })
 local connByNpc: { [Model]: RBXScriptConnection } = setmetatable({}, { __mode = "k" })
 
+local HRP_NO_COLLISION_AFTER_SECONDS = 5
+
 local function getHumanoid(model: Model): Humanoid?
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -59,6 +61,21 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 	end
 
 	lastHealthByNpc[npc] = humanoid.Health
+
+	-- After a short lifetime, disable collisions on HRP to reduce crowd jamming.
+	-- Applies to both team NPCs and AI NPCs (anything we track here).
+	local hrp = npc:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		local rootPart: BasePart = hrp
+		task.delay(HRP_NO_COLLISION_AFTER_SECONDS, function()
+			if npc.Parent == nil or rootPart.Parent == nil then
+				return
+			end
+			pcall(function()
+				rootPart.CanCollide = false
+			end)
+		end)
+	end
 
 	connByNpc[npc] = humanoid.HealthChanged:Connect(function(health: number)
 		local last = lastHealthByNpc[npc]
