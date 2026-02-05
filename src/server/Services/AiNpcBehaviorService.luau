@@ -3,7 +3,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local UnitParams = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("UnitParams"))
+local CombatParams = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
 local Animations = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 
 local WALK_ANIM_SPEED_FACTOR = 1.5 -- animation speed multiplier
@@ -86,9 +86,9 @@ local function getAnimationId(unitKind: string, unitClass: string, animationType
 	return nil
 end
 
-local function getUnitParams(unitKind: string, unitClass: string): any?
-	local kindKey = findKeyCaseInsensitive(UnitParams, unitKind)
-	local params = if kindKey then UnitParams[kindKey] else nil
+local function getCombatParams(unitKind: string, unitClass: string): any?
+	local kindKey = findKeyCaseInsensitive(CombatParams, unitKind)
+	local params = if kindKey then CombatParams[kindKey] else nil
 	if not params then
 		return nil
 	end
@@ -136,9 +136,9 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 		return
 	end
 	
-	local params = getUnitParams(unitKind, unitClass)
+	local params = getCombatParams(unitKind, unitClass)
 	if not params then
-		dprint(string.format("[AiNpcBehavior] ERROR: No params found for %s/%s in UnitParams", 
+		dprint(string.format("[AiNpcBehavior] ERROR: No params found for %s/%s in CombatParams", 
 			unitKind, unitClass))
 		return
 	end
