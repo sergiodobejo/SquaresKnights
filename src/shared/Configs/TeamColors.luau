@@ -3,6 +3,12 @@
 
 local Shared = {}
 
+local WHITE = Color3.new(1, 1, 1)
+local BLACK = Color3.new(0, 0, 0)
+
+local LIGHT_LERP_ALPHA = 0.18
+local DARK_LERP_ALPHA = 0.18
+
 Shared.ByName = {
 	red = Color3.fromRGB(255, 80, 80),
 	blue = Color3.fromRGB(95, 170, 255),
@@ -24,6 +30,25 @@ function Shared.GetColor3(colorName: any): Color3
 		end
 	end
 	return Color3.fromRGB(255, 255, 255)
+end
+
+function Shared.GetLighterColor3(baseColor: Color3): Color3
+	return baseColor:Lerp(WHITE, LIGHT_LERP_ALPHA)
+end
+
+function Shared.GetDarkerColor3(baseColor: Color3): Color3
+	return baseColor:Lerp(BLACK, DARK_LERP_ALPHA)
+end
+
+function Shared.GetCheckerboardVariantColor3(baseColor: Color3, ix: number, iz: number): Color3
+	if ((ix + iz) % 2) == 0 then
+		return Shared.GetLighterColor3(baseColor)
+	end
+	return Shared.GetDarkerColor3(baseColor)
+end
+
+function Shared.GetCheckerboardColor3(colorName: any, ix: number, iz: number): Color3
+	return Shared.GetCheckerboardVariantColor3(Shared.GetColor3(colorName), ix, iz)
 end
 
 return Shared

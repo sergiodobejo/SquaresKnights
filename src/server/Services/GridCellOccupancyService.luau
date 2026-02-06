@@ -149,7 +149,12 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 	if actualColorName then
 		teamColorName = actualColorName
 	end
-	local teamColor3 = TeamColors.GetColor3(teamColorName)
+	local baseTeamColor3 = TeamColors.GetColor3(teamColorName)
+	local ix, iz = GridCells.ParseCellKey(key)
+	local overlayColor3 = baseTeamColor3
+	if ix ~= nil and iz ~= nil then
+		overlayColor3 = TeamColors.GetCheckerboardVariantColor3(baseTeamColor3, ix, iz)
+	end
 
 	local marker = occupancyFolder:FindFirstChild(key)
 	if not marker then
@@ -158,13 +163,13 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 		marker.Parent = occupancyFolder
 	end
 	marker:SetAttribute("TeamColorName", teamColorName)
-	marker:SetAttribute("TeamColor3", teamColor3)
+	marker:SetAttribute("TeamColor3", baseTeamColor3)
+	marker:SetAttribute("OverlayColor3", overlayColor3)
 	marker:SetAttribute("Reserved", false)
 	marker:SetAttribute("Occupied", true)
 
 	local overlay: BasePart? = nil
 	if baseplate then
-		local ix, iz = GridCells.ParseCellKey(key)
 		if ix ~= nil and iz ~= nil then
 			destroyOverlayForKey(key)
 			local part = Instance.new("Part")
@@ -175,7 +180,7 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 			part.CanTouch = false
 			part.Material = Enum.Material.Concrete
 			part.Reflectance = 0
-			part.Color = teamColor3
+			part.Color = overlayColor3
 			part.Transparency = OVERLAY_TRANSPARENCY
 			part.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, OVERLAY_HEIGHT, GridCells.SQUARE_SIZE_STUDS)
 			part.CFrame = GridCells.GetCellCFrameOnTop(baseplate, ix, iz, (OVERLAY_HEIGHT / 2) + OVERLAY_Y_GAP)
