@@ -250,6 +250,15 @@ local function computeBlockedCellKeysForModel(baseplate: BasePart, model: Model)
 	local izMin = math.floor(minZ / GridCells.SQUARE_SIZE_STUDS)
 	local izMax = math.floor(maxZ / GridCells.SQUARE_SIZE_STUDS)
 
+	-- The bounding-box approach tends to include a 1-cell "ring" around the castle.
+	-- If the rectangle is at least 3x3 cells, shrink by 1 on each side.
+	if (ixMax - ixMin) >= 2 and (izMax - izMin) >= 2 then
+		ixMin += 1
+		ixMax -= 1
+		izMin += 1
+		izMax -= 1
+	end
+
 	local keys: { string } = {}
 	for ix = ixMin, ixMax do
 		for iz = izMin, izMax do
