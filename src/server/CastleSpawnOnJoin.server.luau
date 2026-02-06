@@ -10,7 +10,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TeamColorService = require(script.Parent:WaitForChild("Services"):WaitForChild("TeamColorService"))
+local GridCellOccupancyService = require(script.Parent:WaitForChild("Services"):WaitForChild("GridCellOccupancyService"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
+local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local BASEPLATE_NAME = "Baseplate"
 local BUILDINGS_FOLDER_NAME = "Buildings"
@@ -190,6 +192,88 @@ end
 local castlesByUserId: { [number]: Model } = {}
 local spawnCFrameByUserId: { [number]: CFrame } = {}
 
+local blockedCellKeysByUserId: { [number]: { string } } = {}
+
+local function unblockCastleCellsForUserId(userId: number)
+	local keys = blockedCellKeysByUserId[userId]
+	if not keys then
+		return
+	end
+	blockedCellKeysByUserId[userId] = nil
+	for _, key in ipairs(keys) do
+		GridCellOccupancyService.UnblockCellKey(key)
+	end
+end
+
+local function computeBlockedCellKeysForModel(baseplate: BasePart, model: Model): { string }
+	local bbCf, bbSize = model:GetBoundingBox()
+	local hx = bbSize.X * 0.5
+	local hy = bbSize.Y * 0.5
+	local hz = bbSize.Z * 0.5
+
+	local function cornerWorld(dx: number, dy: number, dz: number): Vector3
+		return (bbCf * CFrame.new(dx, dy, dz)).Position
+	end
+
+	local function toBaseLocal(posWorld: Vector3): Vector3
+		return baseplate.CFrame:PointToObjectSpace(posWorld)
+	end
+
+	local minLocalX = math.huge
+	local maxLocalX = -math.huge
+	local minLocalZ = math.huge
+	local maxLocalZ = -math.huge
+
+	for _, sx in ipairs({ -1, 1 }) do
+		for _, sy in ipairs({ -1, 1 }) do
+			for _, sz in ipairs({ -1, 1 }) do
+				local localPos = toBaseLocal(cornerWorld(sx * hx, sy * hy, sz * hz))
+				minLocalX = math.min(minLocalX, localPos.X)
+				maxLocalX = math.max(maxLocalX, localPos.X)
+				minLocalZ = math.min(minLocalZ, localPos.Z)
+				maxLocalZ = math.max(maxLocalZ, localPos.Z)
+			end
+		end
+	end
+
+	local halfX = baseplate.Size.X / 2
+	local halfZ = baseplate.Size.Z / 2
+	local eps = 1e-4
+
+	local minX = math.clamp(minLocalX + halfX, 0, baseplate.Size.X - eps)
+	local maxX = math.clamp(maxLocalX + halfX, 0, baseplate.Size.X - eps)
+	local minZ = math.clamp(minLocalZ + halfZ, 0, baseplate.Size.Z - eps)
+	local maxZ = math.clamp(maxLocalZ + halfZ, 0, baseplate.Size.Z - eps)
+
+	local ixMin = math.floor(minX / GridCells.SQUARE_SIZE_STUDS)
+	local ixMax = math.floor(maxX / GridCells.SQUARE_SIZE_STUDS)
+	local izMin = math.floor(minZ / GridCells.SQUARE_SIZE_STUDS)
+	local izMax = math.floor(maxZ / GridCells.SQUARE_SIZE_STUDS)
+
+	local keys: { string } = {}
+	for ix = ixMin, ixMax do
+		for iz = izMin, izMax do
+			if GridCells.IsIndexWithinBaseplate(baseplate, ix, iz) then
+				table.insert(keys, GridCells.GetCellKey(ix, iz))
+			end
+		end
+	end
+
+	return keys
+end
+
+local function blockCastleCellsForPlayer(player: Player, baseplate: BasePart, castle: Model)
+	local keys = computeBlockedCellKeysForModel(baseplate, castle)
+	local blockedKeys: { string } = {}
+	for _, key in ipairs(keys) do
+		local ok = GridCellOccupancyService.BlockCellKey(key, "Castle", player.UserId)
+		if ok then
+			table.insert(blockedKeys, key)
+		end
+	end
+	blockedCellKeysByUserId[player.UserId] = blockedKeys
+end
+
 local cornerIdByUserId: { [number]: number } = {}
 local occupiedCornerIds: { [number]: boolean } = {}
 
@@ -233,6 +317,8 @@ local function ensureCastleForPlayer(player: Player)
 	-- Ensure team color exists (idempotent).
 	TeamColorService.AssignPlayer(player)
 
+	unblockCastleCellsForUserId(player.UserId)
+
 	local baseplate = getBaseplate()
 	if not baseplate then
 		warn("[CastleSpawnOnJoin] Workspace/" .. BASEPLATE_NAME .. " not found")
@@ -263,6 +349,17 @@ local function ensureCastleForPlayer(player: Player)
 		existing:Destroy()
 	end
 	clone.Parent = root
+
+	blockCastleCellsForPlayer(player, baseplate, clone)
+
+	clone.AncestryChanged:Connect(function(_, parent)
+		if parent ~= nil then
+			return
+		end
+		if castlesByUserId[player.UserId] == clone then
+			unblockCastleCellsForUserId(player.UserId)
+		end
+	end)
 
 	castlesByUserId[player.UserId] = clone
 	spawnCFrameByUserId[player.UserId] = spawnCf
@@ -309,6 +406,7 @@ end
 local function onPlayerRemoving(player: Player)
 	local userId = player.UserId
 	spawnCFrameByUserId[userId] = nil
+	unblockCastleCellsForUserId(userId)
 
 	local cornerId = cornerIdByUserId[userId]
 	cornerIdByUserId[userId] = nil

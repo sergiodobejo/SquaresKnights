@@ -59,6 +59,12 @@ local overlayFolder = ensureOverlayFolder()
 
 -- reservation/occupied state is kept server-side for atomicity.
 local reservedByKey: { [string]: { teamColorName: string } } = {}
+local blockedByKey: {
+	[string]: {
+		kind: string?,
+		userId: number?,
+	}
+} = {}
 local occupiedByKey: {
 	[string]: {
 		teamColorName: string,
@@ -75,7 +81,49 @@ function Shared.GetReplicatedFolder(): Folder
 end
 
 function Shared.IsBlocked(key: string): boolean
-	return reservedByKey[key] ~= nil or occupiedByKey[key] ~= nil
+	return reservedByKey[key] ~= nil or occupiedByKey[key] ~= nil or blockedByKey[key] ~= nil
+end
+
+-- Blocks a cell key without spawning an NPC (used for static obstacles like castles).
+-- Replicates a marker folder under ReplicatedStorage/CellOccupancy so clients can treat it as blocked.
+-- Returns false if the key is currently reserved/occupied by an NPC.
+function Shared.BlockCellKey(key: string, kind: string?, userId: number?): boolean
+	if blockedByKey[key] ~= nil then
+		return true
+	end
+	if reservedByKey[key] ~= nil or occupiedByKey[key] ~= nil then
+		return false
+	end
+
+	-- If a marker already exists (e.g. from a previous session), treat it as blocked to avoid overwriting.
+	local existingMarker = occupancyFolder:FindFirstChild(key)
+	if existingMarker ~= nil then
+		blockedByKey[key] = { kind = kind, userId = userId }
+		return true
+	end
+
+	blockedByKey[key] = { kind = kind, userId = userId }
+
+	local marker = Instance.new("Folder")
+	marker.Name = key
+	marker:SetAttribute("Blocked", true)
+	if type(kind) == "string" and kind ~= "" then
+		marker:SetAttribute("BlockKind", kind)
+	end
+	if type(userId) == "number" then
+		marker:SetAttribute("BlockingUserId", userId)
+	end
+	marker.Parent = occupancyFolder
+
+	return true
+end
+
+function Shared.UnblockCellKey(key: string)
+	blockedByKey[key] = nil
+	local marker = occupancyFolder:FindFirstChild(key)
+	if marker and marker:IsA("Folder") and marker:GetAttribute("Blocked") == true then
+		marker:Destroy()
+	end
 end
 
 function Shared.TryReserveCellKey(key: string, teamColorName: string): boolean
@@ -97,7 +145,7 @@ end
 function Shared.CancelReservation(key: string)
 	reservedByKey[key] = nil
 	local marker = occupancyFolder:FindFirstChild(key)
-	if marker then
+	if marker and marker:GetAttribute("Blocked") ~= true then
 		marker:Destroy()
 	end
 end
@@ -127,7 +175,7 @@ function Shared.FreeCellKey(key: string)
 	destroyOverlayForKey(key)
 
 	local marker = occupancyFolder:FindFirstChild(key)
-	if marker then
+	if marker and marker:GetAttribute("Blocked") ~= true then
 		marker:Destroy()
 	end
 end
