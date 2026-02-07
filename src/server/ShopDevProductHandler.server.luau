@@ -5,8 +5,12 @@
 -- 1. DevProductId Whitelist: Only allows DevProductIds defined in ShopConfig
 -- 2. Rate Limiting: Prevents spam by limiting to one request per 2 seconds per player
 -- 3. Type Validation: Ensures devId parameter is a valid number
+--
+-- Note: DevProductId whitelist is built at script initialization. If ShopConfig changes
+-- at runtime, the script must be reloaded for changes to take effect.
 
 local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("ShopConfig"))
@@ -35,6 +39,11 @@ local function getValidDevProductIds(): { [number]: boolean }
 end
 
 local validDevProductIds = getValidDevProductIds()
+
+-- Cleanup rate limiting table when players leave to prevent memory leak
+Players.PlayerRemoving:Connect(function(player)
+	lastPromptTime[player.UserId] = nil
+end)
 
 PromptDevProduct.OnServerEvent:Connect(function(player, devId)
 	-- Type validation
