@@ -194,6 +194,9 @@ local spawnCFrameByUserId: { [number]: CFrame } = {}
 
 local blockedCellKeysByUserId: { [number]: { string } } = {}
 
+local CASTLE_BLOCK_INSET_CELLS = 1
+local CASTLE_BLOCK_SIZE_CELLS = 2
+
 local function unblockCastleCellsForUserId(userId: number)
 	local keys = blockedCellKeysByUserId[userId]
 	if not keys then
@@ -205,59 +208,36 @@ local function unblockCastleCellsForUserId(userId: number)
 	end
 end
 
-local function computeBlockedCellKeysForModel(baseplate: BasePart, model: Model): { string }
-	local bbCf, bbSize = model:GetBoundingBox()
-	local hx = bbSize.X * 0.5
-	local hy = bbSize.Y * 0.5
-	local hz = bbSize.Z * 0.5
 
-	local function cornerWorld(dx: number, dy: number, dz: number): Vector3
-		return (bbCf * CFrame.new(dx, dy, dz)).Position
-	end
+local function computeBlockedCellKeysForCorner(baseplate: BasePart, cornerId: number): { string }
+	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
+	local signX, signZ = getCornerSignsForCornerId(cornerId)
 
-	local function toBaseLocal(posWorld: Vector3): Vector3
-		return baseplate.CFrame:PointToObjectSpace(posWorld)
-	end
-
-	local minLocalX = math.huge
-	local maxLocalX = -math.huge
-	local minLocalZ = math.huge
-	local maxLocalZ = -math.huge
-
-	for _, sx in ipairs({ -1, 1 }) do
-		for _, sy in ipairs({ -1, 1 }) do
-			for _, sz in ipairs({ -1, 1 }) do
-				local localPos = toBaseLocal(cornerWorld(sx * hx, sy * hy, sz * hz))
-				minLocalX = math.min(minLocalX, localPos.X)
-				maxLocalX = math.max(maxLocalX, localPos.X)
-				minLocalZ = math.min(minLocalZ, localPos.Z)
-				maxLocalZ = math.max(maxLocalZ, localPos.Z)
-			end
+	local function axisRange(cells: number, sign: number): (number, number)
+		if cells <= 0 then
+			return 0, -1
+		end
+		if sign < 0 then
+			local startIx = CASTLE_BLOCK_INSET_CELLS
+			local endIx = CASTLE_BLOCK_INSET_CELLS + (CASTLE_BLOCK_SIZE_CELLS - 1)
+			startIx = math.clamp(startIx, 0, cells - 1)
+			endIx = math.clamp(endIx, 0, cells - 1)
+			return startIx, endIx
+		else
+			local endIx = (cells - 1) - CASTLE_BLOCK_INSET_CELLS
+			local startIx = endIx - (CASTLE_BLOCK_SIZE_CELLS - 1)
+			startIx = math.clamp(startIx, 0, cells - 1)
+			endIx = math.clamp(endIx, 0, cells - 1)
+			return startIx, endIx
 		end
 	end
 
-	local halfX = baseplate.Size.X / 2
-	local halfZ = baseplate.Size.Z / 2
-	local eps = 1e-4
-
-	local minX = math.clamp(minLocalX + halfX, 0, baseplate.Size.X - eps)
-	local maxX = math.clamp(maxLocalX + halfX, 0, baseplate.Size.X - eps)
-	local minZ = math.clamp(minLocalZ + halfZ, 0, baseplate.Size.Z - eps)
-	local maxZ = math.clamp(maxLocalZ + halfZ, 0, baseplate.Size.Z - eps)
-
-	local ixMin = math.floor(minX / GridCells.SQUARE_SIZE_STUDS)
-	local ixMax = math.floor(maxX / GridCells.SQUARE_SIZE_STUDS)
-	local izMin = math.floor(minZ / GridCells.SQUARE_SIZE_STUDS)
-	local izMax = math.floor(maxZ / GridCells.SQUARE_SIZE_STUDS)
-
-	-- The bounding-box approach tends to include a 1-cell "ring" around the castle.
-	-- If the rectangle is at least 3x3 cells, shrink by 1 on each side.
-	if (ixMax - ixMin) >= 2 and (izMax - izMin) >= 2 then
-		ixMin += 1
-		ixMax -= 1
-		izMin += 1
-		izMax -= 1
-	end
+	local ixA, ixB = axisRange(cellsX, signX)
+	local izA, izB = axisRange(cellsZ, signZ)
+	local ixMin = math.min(ixA, ixB)
+	local ixMax = math.max(ixA, ixB)
+	local izMin = math.min(izA, izB)
+	local izMax = math.max(izA, izB)
 
 	local keys: { string } = {}
 	for ix = ixMin, ixMax do
@@ -267,12 +247,11 @@ local function computeBlockedCellKeysForModel(baseplate: BasePart, model: Model)
 			end
 		end
 	end
-
 	return keys
 end
 
-local function blockCastleCellsForPlayer(player: Player, baseplate: BasePart, castle: Model)
-	local keys = computeBlockedCellKeysForModel(baseplate, castle)
+local function blockCastleCellsForPlayer(player: Player, baseplate: BasePart, cornerId: number)
+	local keys = computeBlockedCellKeysForCorner(baseplate, cornerId)
 	local blockedKeys: { string } = {}
 	for _, key in ipairs(keys) do
 		local ok = GridCellOccupancyService.BlockCellKey(key, "Castle", player.UserId)
@@ -359,7 +338,7 @@ local function ensureCastleForPlayer(player: Player)
 	end
 	clone.Parent = root
 
-	blockCastleCellsForPlayer(player, baseplate, clone)
+	blockCastleCellsForPlayer(player, baseplate, cornerId)
 
 	clone.AncestryChanged:Connect(function(_, parent)
 		if parent ~= nil then
