@@ -1,5 +1,10 @@
 -- ServerScriptService.ShopDevProductHandler
 -- Prompts Developer Product purchases from client UI
+--
+-- Security Features:
+-- 1. DevProductId Whitelist: Only allows DevProductIds defined in ShopConfig
+-- 2. Rate Limiting: Prevents spam by limiting to one request per 2 seconds per player
+-- 3. Type Validation: Ensures devId parameter is a valid number
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
