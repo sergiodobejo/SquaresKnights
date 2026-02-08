@@ -263,7 +263,17 @@ local function isWallOfPlayer(ix: number, iz: number, userId: number, cellsX: nu
 		return false
 	end
 	local key = GridCells.GetCellKey(ix, iz)
-	return occupiedByKey[key] ~= nil and ownerUserIdByKey[key] == userId
+	if occupiedByKey[key] ~= nil and ownerUserIdByKey[key] == userId then
+		return true
+	end
+
+	-- If the player's own castle footprint blocks a cell, count it as a valid boundary wall.
+	local block = blockedByKey[key]
+	if block ~= nil and block.kind == "Castle" and block.userId == userId then
+		return true
+	end
+
+	return false
 end
 
 local function floodFillEmptyRegion(startIx: number, startIz: number, cellsX: number, cellsZ: number, visited: { [string]: boolean }): ({ string }, { [string]: boolean }, boolean)
@@ -555,6 +565,12 @@ local function checkCapturesAroundKey(baseplate: BasePart, key: string, userId: 
 		local nz = pair[2]
 		if withinBounds(nx, nz, cellsX, cellsZ) and isTrulyEmpty(nx, nz, cellsX, cellsZ) then
 			local regionKeys, regionSet, touchesBorder = floodFillEmptyRegion(nx, nz, cellsX, cellsZ, visited)
+			if #regionKeys == 0 then
+				if debug then
+					print(string.format("[CaptureDebug] SKIP empty region start=(%d,%d)", nx, nz))
+				end
+				continue
+			end
 			local enclosed = (not touchesBorder) and isRegionEnclosedByPlayer(regionKeys, regionSet, userId, cellsX, cellsZ)
 			if enclosed then
 				if debug then
