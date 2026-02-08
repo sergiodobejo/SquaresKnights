@@ -14,6 +14,9 @@ local OCCUPANCY_FOLDER_NAME = "CellOccupancy"
 local OVERLAY_FOLDER_NAME = "CellOverlays"
 local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
+-- Duration for temporary capture highlight + block.
+local CAPTURE_HIGHLIGHT_SECONDS = 5
+
 local OVERLAY_HEIGHT = 0.18
 local OVERLAY_Y_GAP = 0.02
 local OVERLAY_TRANSPARENCY = 0
@@ -72,6 +75,11 @@ end
 
 local capturedBlocksFolder = ensureCapturedBlocksFolder()
 local capturedBlockRefCountByKey: { [string]: number } = {}
+
+local function getCaptureExpiresAt(): number
+	-- Use server-synced time so clients can compute remaining time.
+	return workspace:GetServerTimeNow() + CAPTURE_HIGHLIGHT_SECONDS
+end
 
 -- Territory leaderstats: percentage of baseplate cells occupied by a player's NPCs.
 local TERRITORY_LEADERSTAT_NAME = "Territory%"
@@ -166,7 +174,6 @@ local occupiedByKey: {
 } = {}
 
 -- Capture detection (enclosed empty regions)
-local CAPTURE_HIGHLIGHT_SECONDS = 5
 local CAPTURE_OVERLAY_FOLDER_NAME = "CapturedCellOverlays"
 local CAPTURE_OVERLAY_HEIGHT = 0.12
 local CAPTURE_OVERLAY_Y_GAP = 0.28
@@ -310,10 +317,16 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 	for _, key in ipairs(regionKeys) do
 		-- Replicated marker: prevents spawn-preview highlight for everyone while active.
 		capturedBlockRefCountByKey[key] = (capturedBlockRefCountByKey[key] or 0) + 1
-		if capturedBlocksFolder:FindFirstChild(key) == nil then
-			local marker = Instance.new("Folder")
+		local marker = capturedBlocksFolder:FindFirstChild(key)
+		if marker == nil then
+			marker = Instance.new("Folder")
 			marker.Name = key
 			marker.Parent = capturedBlocksFolder
+		end
+		local newExpiresAt = getCaptureExpiresAt()
+		local existingExpiresAt = marker:GetAttribute("ExpiresAt")
+		if type(existingExpiresAt) ~= "number" or existingExpiresAt < newExpiresAt then
+			marker:SetAttribute("ExpiresAt", newExpiresAt)
 		end
 
 		local ix, iz = GridCells.ParseCellKey(key)
