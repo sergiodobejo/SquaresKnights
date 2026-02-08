@@ -86,14 +86,23 @@ local function getAnimationId(unitKind: string, unitClass: string, animationType
 	return nil
 end
 
-local function getCombatParams(unitKind: string, unitClass: string): any?
+local function getCombatParamsForNpc(npc: Model): any?
+	if type(CombatParams) == "table" and type((CombatParams :: any).ResolveForModel) == "function" then
+		return (CombatParams :: any).ResolveForModel(npc)
+	end
+
+	-- Backward compatibility if CombatParams is still a plain table
+	local unitKind, unitClass = getUnitKindAndClass(npc)
+	if not unitKind or not unitClass then
+		return nil
+	end
 	local kindKey = findKeyCaseInsensitive(CombatParams, unitKind)
-	local params = if kindKey then CombatParams[kindKey] else nil
+	local params = if kindKey then (CombatParams :: any)[kindKey] else nil
 	if not params then
 		return nil
 	end
 	local classKey = findKeyCaseInsensitive(params, unitClass)
-	local classParams = if classKey then params[classKey] else nil
+	local classParams = if classKey then (params :: any)[classKey] else nil
 	return classParams
 end
 
@@ -130,16 +139,9 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 	end
 	
 	local unitKind, unitClass = getUnitKindAndClass(aiNpc)
-	if not unitKind or not unitClass then
-		dprint(string.format("[AiNpcBehavior] ERROR: NPC %s missing UnitKind or UnitClass attributes. Kind=%s, Class=%s", 
-			aiNpc.Name, tostring(unitKind), tostring(unitClass)))
-		return
-	end
-	
-	local params = getCombatParams(unitKind, unitClass)
+	local params = getCombatParamsForNpc(aiNpc)
 	if not params then
-		dprint(string.format("[AiNpcBehavior] ERROR: No params found for %s/%s in CombatParams", 
-			unitKind, unitClass))
+		dprint(string.format("[AiNpcBehavior] ERROR: No params found for NPC %s (Kind=%s Class=%s ShopKey=%s)", aiNpc.Name, tostring(unitKind), tostring(unitClass), tostring(aiNpc:GetAttribute((CombatParams :: any).ShopKeyAttribute or "ShopKey"))))
 		return
 	end
 	
@@ -150,7 +152,8 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 	humanoid.WalkSpeed = moveSpeed
 	
 	-- Play walk animation
-	local walkAnimId = getAnimationId(unitKind, unitClass, "Walk")
+	-- Animations still resolve by UnitKind/UnitClass for now
+	local walkAnimId = if unitKind and unitClass then getAnimationId(unitKind, unitClass, "Walk") else nil
 	if walkAnimId then
 		local anim = Instance.new("Animation")
 		anim.AnimationId = "rbxassetid://" .. walkAnimId

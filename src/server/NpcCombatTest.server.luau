@@ -157,30 +157,30 @@ local function resolveAnimationId(model: Model, key: string): string?
 end
 
 local function resolveAttackRange(model: Model): number?
-	local unitKind = model:GetAttribute("UnitKind")
-	local unitClass = model:GetAttribute("UnitClass")
-
-	if type(unitKind) ~= "string" or unitKind == "" then
+	local stats: any? = nil
+	if type(CombatParamsConfig) == "table" and type((CombatParamsConfig :: any).ResolveForModel) == "function" then
+		stats = (CombatParamsConfig :: any).ResolveForModel(model)
+	else
+		local unitKind = model:GetAttribute("UnitKind")
+		local unitClass = model:GetAttribute("UnitClass")
+		if type(unitKind) ~= "string" or unitKind == "" then
+			return nil
+		end
+		if type(unitClass) ~= "string" or unitClass == "" then
+			return nil
+		end
+		local kindKey = toPascalCase(unitKind)
+		local classKey = toPascalCase(unitClass)
+		local kindTable = (CombatParamsConfig :: any)[kindKey]
+		if type(kindTable) ~= "table" then
+			return nil
+		end
+		stats = (kindTable :: any)[classKey]
+	end
+	if type(stats) ~= "table" then
 		return nil
 	end
-	if type(unitClass) ~= "string" or unitClass == "" then
-		return nil
-	end
-
-	local kindKey = toPascalCase(unitKind)
-	local classKey = toPascalCase(unitClass)
-
-	local kindTable = CombatParamsConfig[kindKey]
-	if type(kindTable) ~= "table" then
-		return nil
-	end
-
-	local classTable = kindTable[classKey]
-	if type(classTable) ~= "table" then
-		return nil
-	end
-
-	local attackRange = classTable.AttackRange
+	local attackRange = (stats :: any).AttackRange
 	if type(attackRange) ~= "number" or attackRange <= 0 then
 		return nil
 	end
@@ -189,30 +189,30 @@ local function resolveAttackRange(model: Model): number?
 end
 
 local function resolveDamage(model: Model): number?
-	local unitKind = model:GetAttribute("UnitKind")
-	local unitClass = model:GetAttribute("UnitClass")
-
-	if type(unitKind) ~= "string" or unitKind == "" then
+	local stats: any? = nil
+	if type(CombatParamsConfig) == "table" and type((CombatParamsConfig :: any).ResolveForModel) == "function" then
+		stats = (CombatParamsConfig :: any).ResolveForModel(model)
+	else
+		local unitKind = model:GetAttribute("UnitKind")
+		local unitClass = model:GetAttribute("UnitClass")
+		if type(unitKind) ~= "string" or unitKind == "" then
+			return nil
+		end
+		if type(unitClass) ~= "string" or unitClass == "" then
+			return nil
+		end
+		local kindKey = toPascalCase(unitKind)
+		local classKey = toPascalCase(unitClass)
+		local kindTable = (CombatParamsConfig :: any)[kindKey]
+		if type(kindTable) ~= "table" then
+			return nil
+		end
+		stats = (kindTable :: any)[classKey]
+	end
+	if type(stats) ~= "table" then
 		return nil
 	end
-	if type(unitClass) ~= "string" or unitClass == "" then
-		return nil
-	end
-
-	local kindKey = toPascalCase(unitKind)
-	local classKey = toPascalCase(unitClass)
-
-	local kindTable = CombatParamsConfig[kindKey]
-	if type(kindTable) ~= "table" then
-		return nil
-	end
-
-	local classTable = kindTable[classKey]
-	if type(classTable) ~= "table" then
-		return nil
-	end
-
-	local dmg = classTable.Damage
+	local dmg = (stats :: any).Damage
 	if type(dmg) ~= "number" or dmg <= 0 then
 		return nil
 	end
@@ -221,30 +221,30 @@ local function resolveDamage(model: Model): number?
 end
 
 local function resolveHealth(model: Model): number?
-	local unitKind = model:GetAttribute("UnitKind")
-	local unitClass = model:GetAttribute("UnitClass")
-
-	if type(unitKind) ~= "string" or unitKind == "" then
+	local stats: any? = nil
+	if type(CombatParamsConfig) == "table" and type((CombatParamsConfig :: any).ResolveForModel) == "function" then
+		stats = (CombatParamsConfig :: any).ResolveForModel(model)
+	else
+		local unitKind = model:GetAttribute("UnitKind")
+		local unitClass = model:GetAttribute("UnitClass")
+		if type(unitKind) ~= "string" or unitKind == "" then
+			return nil
+		end
+		if type(unitClass) ~= "string" or unitClass == "" then
+			return nil
+		end
+		local kindKey = toPascalCase(unitKind)
+		local classKey = toPascalCase(unitClass)
+		local kindTable = (CombatParamsConfig :: any)[kindKey]
+		if type(kindTable) ~= "table" then
+			return nil
+		end
+		stats = (kindTable :: any)[classKey]
+	end
+	if type(stats) ~= "table" then
 		return nil
 	end
-	if type(unitClass) ~= "string" or unitClass == "" then
-		return nil
-	end
-
-	local kindKey = toPascalCase(unitKind)
-	local classKey = toPascalCase(unitClass)
-
-	local kindTable = CombatParamsConfig[kindKey]
-	if type(kindTable) ~= "table" then
-		return nil
-	end
-
-	local classTable = kindTable[classKey]
-	if type(classTable) ~= "table" then
-		return nil
-	end
-
-	local hp = classTable.Health
+	local hp = (stats :: any).Health
 	if type(hp) ~= "number" or hp <= 0 then
 		return nil
 	end
@@ -253,30 +253,30 @@ local function resolveHealth(model: Model): number?
 end
 
 local function resolveMoveSpeed(model: Model): number?
-	local unitKind = model:GetAttribute("UnitKind")
-	local unitClass = model:GetAttribute("UnitClass")
-
-	if type(unitKind) ~= "string" or unitKind == "" then
+	local stats: any? = nil
+	if type(CombatParamsConfig) == "table" and type((CombatParamsConfig :: any).ResolveForModel) == "function" then
+		stats = (CombatParamsConfig :: any).ResolveForModel(model)
+	else
+		local unitKind = model:GetAttribute("UnitKind")
+		local unitClass = model:GetAttribute("UnitClass")
+		if type(unitKind) ~= "string" or unitKind == "" then
+			return nil
+		end
+		if type(unitClass) ~= "string" or unitClass == "" then
+			return nil
+		end
+		local kindKey = toPascalCase(unitKind)
+		local classKey = toPascalCase(unitClass)
+		local kindTable = (CombatParamsConfig :: any)[kindKey]
+		if type(kindTable) ~= "table" then
+			return nil
+		end
+		stats = (kindTable :: any)[classKey]
+	end
+	if type(stats) ~= "table" then
 		return nil
 	end
-	if type(unitClass) ~= "string" or unitClass == "" then
-		return nil
-	end
-
-	local kindKey = toPascalCase(unitKind)
-	local classKey = toPascalCase(unitClass)
-
-	local kindTable = CombatParamsConfig[kindKey]
-	if type(kindTable) ~= "table" then
-		return nil
-	end
-
-	local classTable = kindTable[classKey]
-	if type(classTable) ~= "table" then
-		return nil
-	end
-
-	local speed = classTable.MoveSpeed
+	local speed = (stats :: any).MoveSpeed
 	if type(speed) ~= "number" or speed <= 0 then
 		return nil
 	end
