@@ -7,8 +7,10 @@ local Players = game:GetService("Players")
 
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local TeamColors = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamColors"))
+local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("ShopConfig"))
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local TeamColorService = require(ServerScriptService.Services:WaitForChild("TeamColorService"))
+local NpcSpawnService = require(ServerScriptService.Services:WaitForChild("NpcSpawnService"))
 
 local OCCUPANCY_FOLDER_NAME = "CellOccupancy"
 local OVERLAY_FOLDER_NAME = "CellOverlays"
@@ -16,6 +18,10 @@ local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 -- Duration for temporary capture highlight + block.
 local CAPTURE_HIGHLIGHT_SECONDS = 5
+
+local CAPTURE_SPAWN_ITEM_KEY = "Priest"
+local CAPTURE_SPAWN_HEIGHT_ABOVE_SURFACE = 4.2
+local SKIP_CAPTURE_CHECK_ATTRIBUTE = "SkipCaptureCheck"
 
 local OVERLAY_HEIGHT = 0.18
 local OVERLAY_Y_GAP = 0.02
@@ -173,6 +179,8 @@ local occupiedByKey: {
 	}
 } = {}
 
+local Shared = {}
+
 -- Capture detection (enclosed empty regions)
 local CAPTURE_OVERLAY_FOLDER_NAME = "CapturedCellOverlays"
 local CAPTURE_OVERLAY_HEIGHT = 0.12
@@ -189,6 +197,58 @@ end
 
 local function isTrulyEmptyKey(key: string): boolean
 	return reservedByKey[key] == nil and occupiedByKey[key] == nil and blockedByKey[key] == nil
+end
+
+local function getPriestModelName(): string
+	local cfg = ShopConfig.GetConfig(CAPTURE_SPAWN_ITEM_KEY)
+	local modelName = cfg and (cfg :: any).NpcModelName
+	if type(modelName) == "string" and modelName ~= "" then
+		return modelName
+	end
+	return "SK_Priest"
+end
+
+local function spawnFreePriestOnCell(baseplate: BasePart, cellKey: string, userId: number)
+	local player = Players:GetPlayerByUserId(userId)
+	if not player then
+		return
+	end
+
+	-- Only spawn into truly-empty cells.
+	if not isTrulyEmptyKey(cellKey) then
+		return
+	end
+
+	local teamColorName = TeamColorService.GetColorForPlayer(player)
+	if type(teamColorName) ~= "string" or teamColorName == "" then
+		teamColorName = (player:GetAttribute(TeamColorService.Attributes.TeamColor) :: any)
+	end
+	if type(teamColorName) ~= "string" or teamColorName == "" then
+		teamColorName = "white"
+	end
+
+	if not Shared.TryReserveCellKey(cellKey, teamColorName) then
+		return
+	end
+
+	local ix, iz = GridCells.ParseCellKey(cellKey)
+	if ix == nil or iz == nil then
+		Shared.CancelReservation(cellKey)
+		return
+	end
+
+	local spawnPos = GridCells.GetCellCFrameOnTop(baseplate, ix, iz, CAPTURE_SPAWN_HEIGHT_ABOVE_SURFACE).Position
+	local priestModelName = getPriestModelName()
+	local npc = NpcSpawnService.SpawnUnitAtPosition(player, priestModelName, spawnPos)
+	if not npc then
+		Shared.CancelReservation(cellKey)
+		return
+	end
+
+	pcall(function()
+		npc:SetAttribute(SKIP_CAPTURE_CHECK_ATTRIBUTE, true)
+	end)
+	Shared.FinalizeReservation(cellKey, npc, baseplate)
 end
 
 local function isTrulyEmpty(ix: number, iz: number, cellsX: number, cellsZ: number): boolean
@@ -303,6 +363,94 @@ local function isRegionEnclosedByPlayer(regionKeys: { string }, regionSet: { [st
 	return true
 end
 
+local function isCaptureDebugEnabled(): boolean
+	return workspace:GetAttribute("DebugCapture") == true
+end
+
+local function getNonWallReasonForKey(key: string, userId: number): string
+	if occupiedByKey[key] ~= nil then
+		local owner = ownerUserIdByKey[key]
+		if owner == userId then
+			return "ownOccupied"
+		end
+		return "otherOccupied:" .. tostring(owner)
+	end
+	if blockedByKey[key] ~= nil then
+		local b = blockedByKey[key]
+		return "blocked:" .. tostring(b.kind)
+	end
+	if reservedByKey[key] ~= nil then
+		return "reserved"
+	end
+	if capturedBlockRefCountByKey[key] ~= nil or capturedBlocksFolder:FindFirstChild(key) ~= nil then
+		return "capturedBlock"
+	end
+	-- Shouldn't happen (non-empty but not in our maps), but useful for debugging.
+	return "unknownNonEmpty"
+end
+
+local function getEnclosureFailureSummary(regionKeys: { string }, regionSet: { [string]: boolean }, userId: number, cellsX: number, cellsZ: number): string
+	local counts: { [string]: number } = {}
+	local sample: string? = nil
+	local checked = 0
+	local maxChecks = 5000
+
+	for _, key in ipairs(regionKeys) do
+		checked += 1
+		if checked > maxChecks then
+			break
+		end
+		local ix, iz = GridCells.ParseCellKey(key)
+		if ix == nil or iz == nil then
+			return "badKey"
+		end
+		for dx = -1, 1 do
+			for dz = -1, 1 do
+				if dx == 0 and dz == 0 then
+					continue
+				end
+				local nx = (ix :: number) + dx
+				local nz = (iz :: number) + dz
+				if not withinBounds(nx, nz, cellsX, cellsZ) then
+					counts.outOfBounds = (counts.outOfBounds or 0) + 1
+					if not sample then
+						sample = string.format("oob neighbor at %s -> (%d,%d)", key, nx, nz)
+					end
+					continue
+				end
+
+				local nKey = GridCells.GetCellKey(nx, nz)
+				if regionSet[nKey] then
+					continue
+				end
+				if isTrulyEmptyKey(nKey) then
+					continue
+				end
+				if isWallOfPlayer(nx, nz, userId, cellsX, cellsZ) then
+					continue
+				end
+
+				local reason = getNonWallReasonForKey(nKey, userId)
+				counts[reason] = (counts[reason] or 0) + 1
+				if not sample then
+					sample = string.format("non-wall neighbor %s at (%d,%d) touching region cell %s", reason, nx, nz, key)
+				end
+			end
+		end
+	end
+
+	local pieces: { string } = {}
+	for reason, count in pairs(counts) do
+		table.insert(pieces, string.format("%s=%d", reason, count))
+	end
+	table.sort(pieces)
+	local summary = table.concat(pieces, ",")
+	if sample then
+		return summary .. " | sample: " .. sample
+	end
+	return summary ~= "" and summary or "noDetails"
+end
+
 local function highlightCapturedRegion(baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string })
 	if #regionKeys == 0 then
 		return
@@ -350,6 +498,7 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 		if eventFolder.Parent ~= nil then
 			eventFolder:Destroy()
 		end
+		local endedKeys: { string } = {}
 		for _, key in ipairs(regionKeys) do
 			local prev = capturedBlockRefCountByKey[key] or 0
 			local nextCount = prev - 1
@@ -359,9 +508,15 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 				if marker and marker:IsA("Folder") then
 					marker:Destroy()
 				end
+				table.insert(endedKeys, key)
 			else
 				capturedBlockRefCountByKey[key] = nextCount
 			end
+		end
+
+		-- When capture highlight ends, spawn free Priests on those cells.
+		for _, key in ipairs(endedKeys) do
+			spawnFreePriestOnCell(baseplate, key, userId)
 		end
 	end)
 end
@@ -380,26 +535,41 @@ local function checkCapturesAroundKey(baseplate: BasePart, key: string, userId: 
 	end
 
 	local visited: { [string]: boolean } = {}
-	local neighborStarts = {
-		{ (ix :: number) - 1, iz :: number },
-		{ (ix :: number) + 1, iz :: number },
-		{ ix :: number, (iz :: number) - 1 },
-		{ ix :: number, (iz :: number) + 1 },
-	}
+	local neighborStarts: { { number } } = {}
+	for dx = -1, 1 do
+		for dz = -1, 1 do
+			if dx == 0 and dz == 0 then
+				continue
+			end
+			table.insert(neighborStarts, { (ix :: number) + dx, (iz :: number) + dz })
+		end
+	end
+
+	local debug = isCaptureDebugEnabled()
+	if debug then
+		print(string.format("[CaptureDebug] checkCapturesAroundKey placed=%s userId=%d", key, userId))
+	end
 
 	for _, pair in ipairs(neighborStarts) do
 		local nx = pair[1]
 		local nz = pair[2]
 		if withinBounds(nx, nz, cellsX, cellsZ) and isTrulyEmpty(nx, nz, cellsX, cellsZ) then
 			local regionKeys, regionSet, touchesBorder = floodFillEmptyRegion(nx, nz, cellsX, cellsZ, visited)
-			if (not touchesBorder) and isRegionEnclosedByPlayer(regionKeys, regionSet, userId, cellsX, cellsZ) then
+			local enclosed = (not touchesBorder) and isRegionEnclosedByPlayer(regionKeys, regionSet, userId, cellsX, cellsZ)
+			if enclosed then
+				if debug then
+					print(string.format("[CaptureDebug] CAPTURED start=(%d,%d) size=%d", nx, nz, #regionKeys))
+				end
 				highlightCapturedRegion(baseplate, userId, color3, regionKeys)
+			else
+				if debug then
+					local reason = touchesBorder and "touchesBorder" or getEnclosureFailureSummary(regionKeys, regionSet, userId, cellsX, cellsZ)
+					print(string.format("[CaptureDebug] NOT captured start=(%d,%d) size=%d reason=%s", nx, nz, #regionKeys, reason))
+				end
 			end
 		end
 	end
 end
-
-local Shared = {}
 
 function Shared.GetReplicatedFolder(): Folder
 	return occupancyFolder
@@ -611,7 +781,8 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 		ownerUserIdByKey[key] = ownerUserId
 		occupiedCountByUserId[ownerUserId] = (occupiedCountByUserId[ownerUserId] or 0) + 1
 		updateTerritoryForUserId(ownerUserId)
-		if baseplate then
+		local skipCapture = npc:GetAttribute(SKIP_CAPTURE_CHECK_ATTRIBUTE) == true
+		if baseplate and not skipCapture then
 			checkCapturesAroundKey(baseplate, key, ownerUserId, baseTeamColor3)
 		end
 	end
