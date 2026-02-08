@@ -150,6 +150,206 @@ local occupiedByKey: {
 	}
 } = {}
 
+-- Capture detection (enclosed empty regions)
+local CAPTURE_HIGHLIGHT_SECONDS = 5
+local CAPTURE_OVERLAY_FOLDER_NAME = "CapturedCellOverlays"
+local CAPTURE_OVERLAY_HEIGHT = 0.12
+local CAPTURE_OVERLAY_Y_GAP = 0.28
+local CAPTURE_OVERLAY_TRANSPARENCY = 0.35
+
+local function ensureCaptureOverlayFolder(): Folder
+	return getOrCreateFolder(workspace, CAPTURE_OVERLAY_FOLDER_NAME)
+end
+
+local function withinBounds(ix: number, iz: number, cellsX: number, cellsZ: number): boolean
+	return ix >= 0 and iz >= 0 and ix < cellsX and iz < cellsZ
+end
+
+local function isTrulyEmptyKey(key: string): boolean
+	return reservedByKey[key] == nil and occupiedByKey[key] == nil and blockedByKey[key] == nil
+end
+
+local function isTrulyEmpty(ix: number, iz: number, cellsX: number, cellsZ: number): boolean
+	if not withinBounds(ix, iz, cellsX, cellsZ) then
+		return false
+	end
+	return isTrulyEmptyKey(GridCells.GetCellKey(ix, iz))
+end
+
+local function isWallOfPlayer(ix: number, iz: number, userId: number, cellsX: number, cellsZ: number): boolean
+	if not withinBounds(ix, iz, cellsX, cellsZ) then
+		return false
+	end
+	local key = GridCells.GetCellKey(ix, iz)
+	return occupiedByKey[key] ~= nil and ownerUserIdByKey[key] == userId
+end
+
+local function floodFillEmptyRegion(startIx: number, startIz: number, cellsX: number, cellsZ: number, visited: { [string]: boolean }): ({ string }, { [string]: boolean }, boolean)
+	local regionKeys: { string } = {}
+	local regionSet: { [string]: boolean } = {}
+	local touchesBorder = false
+
+	local queueIx: { number } = {}
+	local queueIz: { number } = {}
+	local head = 1
+
+	local function push(ix: number, iz: number)
+		local key = GridCells.GetCellKey(ix, iz)
+		if visited[key] then
+			return
+		end
+		if not isTrulyEmptyKey(key) then
+			return
+		end
+		visited[key] = true
+		table.insert(queueIx, ix)
+		table.insert(queueIz, iz)
+	end
+
+	push(startIx, startIz)
+
+	while head <= #queueIx do
+		local ix = queueIx[head]
+		local iz = queueIz[head]
+		head += 1
+
+		local key = GridCells.GetCellKey(ix, iz)
+		if not regionSet[key] then
+			regionSet[key] = true
+			table.insert(regionKeys, key)
+		end
+
+		if ix == 0 or iz == 0 or ix == (cellsX - 1) or iz == (cellsZ - 1) then
+			touchesBorder = true
+		end
+
+		-- 4-neighbor expansion
+		if ix > 0 then
+			push(ix - 1, iz)
+		end
+		if ix < cellsX - 1 then
+			push(ix + 1, iz)
+		end
+		if iz > 0 then
+			push(ix, iz - 1)
+		end
+		if iz < cellsZ - 1 then
+			push(ix, iz + 1)
+		end
+	end
+
+	return regionKeys, regionSet, touchesBorder
+end
+
+local function isRegionEnclosedByPlayer(regionKeys: { string }, regionSet: { [string]: boolean }, userId: number, cellsX: number, cellsZ: number): boolean
+	for _, key in ipairs(regionKeys) do
+		local ix, iz = GridCells.ParseCellKey(key)
+		if ix == nil or iz == nil then
+			return false
+		end
+
+		-- Check boundary in 8-neighborhood.
+		for dx = -1, 1 do
+			for dz = -1, 1 do
+				if dx == 0 and dz == 0 then
+					continue
+				end
+				local nx = (ix :: number) + dx
+				local nz = (iz :: number) + dz
+				if not withinBounds(nx, nz, cellsX, cellsZ) then
+					-- If region doesn't touch border, this shouldn't happen.
+					return false
+				end
+
+				local nKey = GridCells.GetCellKey(nx, nz)
+				if regionSet[nKey] then
+					continue
+				end
+
+				if isTrulyEmptyKey(nKey) then
+					continue
+				end
+
+				-- Any non-empty neighbor must be player's occupied cell.
+				if not isWallOfPlayer(nx, nz, userId, cellsX, cellsZ) then
+					return false
+				end
+			end
+		end
+	end
+
+	return true
+end
+
+local function highlightCapturedRegion(baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string })
+	if #regionKeys == 0 then
+		return
+	end
+
+	local captureFolder = ensureCaptureOverlayFolder()
+	local stamp = string.format("%d_%d", userId, math.floor(os.clock() * 1000))
+	local eventFolder = Instance.new("Folder")
+	eventFolder.Name = "Capture_" .. stamp
+	eventFolder.Parent = captureFolder
+
+	for _, key in ipairs(regionKeys) do
+		local ix, iz = GridCells.ParseCellKey(key)
+		if ix ~= nil and iz ~= nil then
+			local p = Instance.new("Part")
+			p.Name = key
+			p.Anchored = true
+			p.CanCollide = false
+			p.CanQuery = false
+			p.CanTouch = false
+			p.Material = Enum.Material.Neon
+			p.Color = color3
+			p.Transparency = CAPTURE_OVERLAY_TRANSPARENCY
+			p.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, CAPTURE_OVERLAY_HEIGHT, GridCells.SQUARE_SIZE_STUDS)
+			p.CFrame = GridCells.GetCellCFrameOnTop(baseplate, ix, iz, (CAPTURE_OVERLAY_HEIGHT / 2) + CAPTURE_OVERLAY_Y_GAP)
+			p.Parent = eventFolder
+		end
+	end
+
+	task.delay(CAPTURE_HIGHLIGHT_SECONDS, function()
+		if eventFolder.Parent ~= nil then
+			eventFolder:Destroy()
+		end
+	end)
+end
+
+local function checkCapturesAroundKey(baseplate: BasePart, key: string, userId: number, color3: Color3)
+	if userId <= 0 then
+		return
+	end
+	local ix, iz = GridCells.ParseCellKey(key)
+	if ix == nil or iz == nil then
+		return
+	end
+	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
+	if cellsX <= 0 or cellsZ <= 0 then
+		return
+	end
+
+	local visited: { [string]: boolean } = {}
+	local neighborStarts = {
+		{ (ix :: number) - 1, iz :: number },
+		{ (ix :: number) + 1, iz :: number },
+		{ ix :: number, (iz :: number) - 1 },
+		{ ix :: number, (iz :: number) + 1 },
+	}
+
+	for _, pair in ipairs(neighborStarts) do
+		local nx = pair[1]
+		local nz = pair[2]
+		if withinBounds(nx, nz, cellsX, cellsZ) and isTrulyEmpty(nx, nz, cellsX, cellsZ) then
+			local regionKeys, regionSet, touchesBorder = floodFillEmptyRegion(nx, nz, cellsX, cellsZ, visited)
+			if (not touchesBorder) and isRegionEnclosedByPlayer(regionKeys, regionSet, userId, cellsX, cellsZ) then
+				highlightCapturedRegion(baseplate, userId, color3, regionKeys)
+			end
+		end
+	end
+end
+
 local Shared = {}
 
 function Shared.GetReplicatedFolder(): Folder
@@ -355,6 +555,9 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 		ownerUserIdByKey[key] = ownerUserId
 		occupiedCountByUserId[ownerUserId] = (occupiedCountByUserId[ownerUserId] or 0) + 1
 		updateTerritoryForUserId(ownerUserId)
+		if baseplate then
+			checkCapturesAroundKey(baseplate, key, ownerUserId, baseTeamColor3)
+		end
 	end
 
 	return true
