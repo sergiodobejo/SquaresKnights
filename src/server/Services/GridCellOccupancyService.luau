@@ -12,6 +12,7 @@ local TeamColorService = require(ServerScriptService.Services:WaitForChild("Team
 
 local OCCUPANCY_FOLDER_NAME = "CellOccupancy"
 local OVERLAY_FOLDER_NAME = "CellOverlays"
+local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 local OVERLAY_HEIGHT = 0.18
 local OVERLAY_Y_GAP = 0.02
@@ -57,6 +58,20 @@ end
 
 local occupancyFolder = ensureReplicatedFolder()
 local overlayFolder = ensureOverlayFolder()
+
+local function ensureCapturedBlocksFolder(): Folder
+	local existing = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = CAPTURED_BLOCKS_FOLDER_NAME
+	folder.Parent = ReplicatedStorage
+	return folder
+end
+
+local capturedBlocksFolder = ensureCapturedBlocksFolder()
+local capturedBlockRefCountByKey: { [string]: number } = {}
 
 -- Territory leaderstats: percentage of baseplate cells occupied by a player's NPCs.
 local TERRITORY_LEADERSTAT_NAME = "Territory%"
@@ -293,6 +308,14 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 	eventFolder.Parent = captureFolder
 
 	for _, key in ipairs(regionKeys) do
+		-- Replicated marker: prevents spawn-preview highlight for everyone while active.
+		capturedBlockRefCountByKey[key] = (capturedBlockRefCountByKey[key] or 0) + 1
+		if capturedBlocksFolder:FindFirstChild(key) == nil then
+			local marker = Instance.new("Folder")
+			marker.Name = key
+			marker.Parent = capturedBlocksFolder
+		end
+
 		local ix, iz = GridCells.ParseCellKey(key)
 		if ix ~= nil and iz ~= nil then
 			local p = Instance.new("Part")
@@ -313,6 +336,19 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 	task.delay(CAPTURE_HIGHLIGHT_SECONDS, function()
 		if eventFolder.Parent ~= nil then
 			eventFolder:Destroy()
+		end
+		for _, key in ipairs(regionKeys) do
+			local prev = capturedBlockRefCountByKey[key] or 0
+			local nextCount = prev - 1
+			if nextCount <= 0 then
+				capturedBlockRefCountByKey[key] = nil
+				local marker = capturedBlocksFolder:FindFirstChild(key)
+				if marker and marker:IsA("Folder") then
+					marker:Destroy()
+				end
+			else
+				capturedBlockRefCountByKey[key] = nextCount
+			end
 		end
 	end)
 end
@@ -357,7 +393,14 @@ function Shared.GetReplicatedFolder(): Folder
 end
 
 function Shared.IsBlocked(key: string): boolean
-	return reservedByKey[key] ~= nil or occupiedByKey[key] ~= nil or blockedByKey[key] ~= nil
+	if reservedByKey[key] ~= nil or occupiedByKey[key] ~= nil or blockedByKey[key] ~= nil then
+		return true
+	end
+	if capturedBlockRefCountByKey[key] ~= nil then
+		return true
+	end
+	-- Fallback in case a marker exists without refcount (e.g. leftover instances).
+	return capturedBlocksFolder:FindFirstChild(key) ~= nil
 end
 
 -- Blocks a cell key without spawning an NPC (used for static obstacles like castles).

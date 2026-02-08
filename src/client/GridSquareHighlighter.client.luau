@@ -16,6 +16,9 @@ local COLOR = Color3.fromRGB(0, 255, 170)
 local TRANSPARENCY = 0.25
 
 local occupancyFolder: Folder? = nil
+local capturedBlocksFolder: Folder? = nil
+
+local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 local function isCellBlocked(cellKey: string): boolean
 	if not occupancyFolder or not occupancyFolder:IsDescendantOf(ReplicatedStorage) then
@@ -24,13 +27,20 @@ local function isCellBlocked(cellKey: string): boolean
 			occupancyFolder = inst
 		else
 			occupancyFolder = nil
-			return false
 		end
 	end
-	if not occupancyFolder then
-		return false
+	if not capturedBlocksFolder or not capturedBlocksFolder:IsDescendantOf(ReplicatedStorage) then
+		local inst = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+		if inst and inst:IsA("Folder") then
+			capturedBlocksFolder = inst
+		else
+			capturedBlocksFolder = nil
+		end
 	end
-	return occupancyFolder:FindFirstChild(cellKey) ~= nil
+
+	local occupied = (occupancyFolder ~= nil and occupancyFolder:FindFirstChild(cellKey) ~= nil)
+	local captured = (capturedBlocksFolder ~= nil and capturedBlocksFolder:FindFirstChild(cellKey) ~= nil)
+	return occupied or captured
 end
 
 local function findBaseplate(): BasePart?

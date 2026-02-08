@@ -28,6 +28,9 @@ local Shared = {}
 local started = false
 
 local occupancyFolder: Folder? = nil
+local capturedBlocksFolder: Folder? = nil
+
+local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 local function getBaseplate(): BasePart?
 	local inst = workspace:FindFirstChild("Baseplate")
@@ -61,6 +64,19 @@ local function ensureOccupancyFolder(): Folder?
 	return nil
 end
 
+local function ensureCapturedBlocksFolder(): Folder?
+	if capturedBlocksFolder and capturedBlocksFolder:IsDescendantOf(ReplicatedStorage) then
+		return capturedBlocksFolder
+	end
+	local inst = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+	if inst and inst:IsA("Folder") then
+		capturedBlocksFolder = inst
+		return capturedBlocksFolder
+	end
+	capturedBlocksFolder = nil
+	return nil
+end
+
 local function getCurrentCellKeyUnderPlayer(): string?
 	local player = Players.LocalPlayer
 	local baseplate = getBaseplate()
@@ -81,10 +97,10 @@ local function isCurrentCellBlocked(): boolean
 		return true
 	end
 	local folder = ensureOccupancyFolder()
-	if not folder then
-		return false
-	end
-	return folder:FindFirstChild(key) ~= nil
+	local capturedFolder = ensureCapturedBlocksFolder()
+	local occupied = (folder ~= nil and folder:FindFirstChild(key) ~= nil)
+	local captured = (capturedFolder ~= nil and capturedFolder:FindFirstChild(key) ~= nil)
+	return occupied or captured
 end
 
 function Shared.OnStart()
