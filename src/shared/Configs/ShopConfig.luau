@@ -109,7 +109,7 @@ local Config = {
 		},
 		["HighPriest"] = {
 			ItemKind = "npc",
-			Enabled = false,
+			Enabled = true,
 			NpcModelName = "SK_HighPriest",
 			Price = 1,
 			RobuxPrice = 1,
