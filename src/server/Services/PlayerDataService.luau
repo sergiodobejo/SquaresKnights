@@ -41,6 +41,14 @@ local function ensureLeaderstats(player: Player)
 		coins.Parent = leaderstats
 	end
 
+	local territory = leaderstats:FindFirstChild("Territory%")
+	if not territory then
+		territory = Instance.new("IntValue")
+		territory.Name = "Territory%"
+		territory.Value = 0
+		territory.Parent = leaderstats
+	end
+
 	return coins :: IntValue
 end
 

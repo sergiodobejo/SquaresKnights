@@ -46,7 +46,7 @@ local function getHumanoid(model: Model): Humanoid?
 	return nil
 end
 
-local function getCharacterRoot(character: Model): BasePart?
+local function _getCharacterRoot(character: Model): BasePart?
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if hrp and hrp:IsA("BasePart") then
 		return hrp
@@ -54,7 +54,7 @@ local function getCharacterRoot(character: Model): BasePart?
 	return nil
 end
 
-local function getCastleForPlayer(player: Player): Model?
+local function _getCastleForPlayer(player: Player): Model?
 	local buildingsFolder = workspace:FindFirstChild("PlayerBuildings")
 	if not buildingsFolder then
 		return nil
@@ -86,7 +86,7 @@ local function pickRandomCastle(): Model?
 	return castles[math.random(1, #castles)]
 end
 
-local function getBaseplateCenter(): Vector3?
+local function _getBaseplateCenter(): Vector3?
 	local baseplate = GridCells.FindBaseplate()
 	if not baseplate then
 		return nil

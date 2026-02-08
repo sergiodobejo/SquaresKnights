@@ -4,35 +4,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 
-local function getOrCreateFolder(parent: Instance, name: string): Folder
-	local existing = parent:FindFirstChild(name)
-	if existing and existing:IsA("Folder") then
-		return existing
-	end
-
-	local folder = Instance.new("Folder")
-	folder.Name = name
-	folder.Parent = parent
-	return folder
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 10)
+if not remotesFolder then
+	error("[NpcDamagePopupService] Missing ReplicatedStorage/Remotes folder. Create it in Roblox Studio.")
 end
 
-local function getOrCreateRemoteEvent(parent: Instance, name: string): RemoteEvent
-	local existing = parent:FindFirstChild(name)
-	if existing and existing:IsA("RemoteEvent") then
-		return existing
-	end
-
-	local remote = Instance.new("RemoteEvent")
-	remote.Name = name
-	remote.Parent = parent
-	return remote
+local npcDamagePopupRemoteInst = (remotesFolder :: Instance):WaitForChild(RemoteNames.NpcDamagePopup, 10)
+if not npcDamagePopupRemoteInst or not npcDamagePopupRemoteInst:IsA("RemoteEvent") then
+	error(string.format(
+		"[NpcDamagePopupService] Missing RemoteEvent ReplicatedStorage/Remotes/%s. Create it in Roblox Studio.",
+		RemoteNames.NpcDamagePopup
+	))
 end
+local npcDamagePopupRemote = npcDamagePopupRemoteInst :: RemoteEvent
 
-local remotesFolder = getOrCreateFolder(ReplicatedStorage, "Remotes")
-local npcDamagePopupRemote = getOrCreateRemoteEvent(remotesFolder, RemoteNames.NpcDamagePopup)
-
-local lastHealthByNpc: { [Model]: number } = setmetatable({}, { __mode = "k" })
-local connByNpc: { [Model]: RBXScriptConnection } = setmetatable({}, { __mode = "k" })
+local lastHealthByNpc: { [Model]: number } = (setmetatable({}, { __mode = "k" }) :: any)
+local connByNpc: { [Model]: RBXScriptConnection } = (setmetatable({}, { __mode = "k" }) :: any)
 
 local HRP_NO_COLLISION_AFTER_SECONDS = 5
 

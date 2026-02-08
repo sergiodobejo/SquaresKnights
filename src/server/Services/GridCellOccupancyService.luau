@@ -3,6 +3,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local TeamColors = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamColors"))
@@ -56,6 +57,81 @@ end
 
 local occupancyFolder = ensureReplicatedFolder()
 local overlayFolder = ensureOverlayFolder()
+
+-- Territory leaderstats: percentage of baseplate cells occupied by a player's NPCs.
+local TERRITORY_LEADERSTAT_NAME = "Territory%"
+local occupiedCountByUserId: { [number]: number } = {}
+local ownerUserIdByKey: { [string]: number } = {}
+local cachedBaseplate: BasePart? = nil
+local cachedTotalCells: number = 0
+
+local function getTotalCells(): number
+	if cachedBaseplate and cachedBaseplate:IsDescendantOf(workspace) then
+		return cachedTotalCells
+	end
+	cachedBaseplate = GridCells.FindBaseplate()
+	if not cachedBaseplate then
+		cachedTotalCells = 0
+		return 0
+	end
+	local cellsX, cellsZ = GridCells.GetCellCounts(cachedBaseplate)
+	cachedTotalCells = math.max(0, math.floor(cellsX)) * math.max(0, math.floor(cellsZ))
+	return cachedTotalCells
+end
+
+local function ensureTerritoryValue(player: Player): IntValue?
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return nil
+	end
+	local v = leaderstats:FindFirstChild(TERRITORY_LEADERSTAT_NAME)
+	if v and v:IsA("IntValue") then
+		return v
+	end
+	v = Instance.new("IntValue")
+	v.Name = TERRITORY_LEADERSTAT_NAME
+	v.Value = 0
+	v.Parent = leaderstats
+	return v :: IntValue
+end
+
+local function updateTerritoryForUserId(userId: number)
+	if type(userId) ~= "number" or userId <= 0 then
+		return
+	end
+	local player = Players:GetPlayerByUserId(userId)
+	if not player then
+		return
+	end
+	local totalCells = getTotalCells()
+	local occupied = occupiedCountByUserId[userId] or 0
+	local pct = 0
+	if totalCells > 0 and occupied > 0 then
+		pct = math.floor((occupied * 100) / totalCells + 0.5)
+		if pct < 0 then
+			pct = 0
+		elseif pct > 100 then
+			pct = 100
+		end
+	end
+	local v = ensureTerritoryValue(player)
+	if v then
+		v.Value = pct
+	end
+end
+
+do
+	local function onPlayer(player: Player)
+		-- Defer to let PlayerDataService create leaderstats.
+		task.defer(function()
+			updateTerritoryForUserId(player.UserId)
+		end)
+	end
+	Players.PlayerAdded:Connect(onPlayer)
+	for _, player in ipairs(Players:GetPlayers()) do
+		onPlayer(player)
+	end
+end
 
 -- reservation/occupied state is kept server-side for atomicity.
 local reservedByKey: { [string]: { teamColorName: string } } = {}
@@ -158,6 +234,18 @@ local function destroyOverlayForKey(key: string)
 end
 
 function Shared.FreeCellKey(key: string)
+	local ownerUserId = ownerUserIdByKey[key]
+	if type(ownerUserId) == "number" and ownerUserId > 0 then
+		ownerUserIdByKey[key] = nil
+		local prev = occupiedCountByUserId[ownerUserId] or 0
+		local nextCount = prev - 1
+		if nextCount < 0 then
+			nextCount = 0
+		end
+		occupiedCountByUserId[ownerUserId] = nextCount
+		updateTerritoryForUserId(ownerUserId)
+	end
+
 	local entry = occupiedByKey[key]
 	if not entry then
 		Shared.CancelReservation(key)
@@ -261,6 +349,13 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 		overlay = overlay,
 		connections = connections,
 	}
+
+	local ownerUserId = Affiliation.GetOwnerUserIdFromModel(npc)
+	if ownerUserId > 0 then
+		ownerUserIdByKey[key] = ownerUserId
+		occupiedCountByUserId[ownerUserId] = (occupiedCountByUserId[ownerUserId] or 0) + 1
+		updateTerritoryForUserId(ownerUserId)
+	end
 
 	return true
 end
