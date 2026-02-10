@@ -3,7 +3,7 @@
 
 local Config = {
 	-- Spawn one AI NPC every N seconds
-	SpawnIntervalSeconds = 5,
+	SpawnIntervalSeconds = 120,
 	
 	-- List of all available NPC model names that AI can spawn
 	AvailableNpcModels = {
