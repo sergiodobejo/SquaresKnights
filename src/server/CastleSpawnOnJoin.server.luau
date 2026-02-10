@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TeamColorService = require(script.Parent:WaitForChild("Services"):WaitForChild("TeamColorService"))
 local GridCellOccupancyService = require(script.Parent:WaitForChild("Services"):WaitForChild("GridCellOccupancyService"))
+local CastleHealthService = require(script.Parent:WaitForChild("Services"):WaitForChild("CastleHealthService"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
@@ -209,7 +210,7 @@ local function unblockCastleCellsForUserId(userId: number)
 end
 
 
-local function computeBlockedCellKeysForCorner(baseplate: BasePart, cornerId: number): { string }
+local function computeBlockedCellRectForCorner(baseplate: BasePart, cornerId: number): (number, number, number, number)
 	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
 	local signX, signZ = getCornerSignsForCornerId(cornerId)
 
@@ -238,7 +239,11 @@ local function computeBlockedCellKeysForCorner(baseplate: BasePart, cornerId: nu
 	local ixMax = math.max(ixA, ixB)
 	local izMin = math.min(izA, izB)
 	local izMax = math.max(izA, izB)
+	return ixMin, ixMax, izMin, izMax
+end
 
+local function computeBlockedCellKeysForCorner(baseplate: BasePart, cornerId: number): { string }
+	local ixMin, ixMax, izMin, izMax = computeBlockedCellRectForCorner(baseplate, cornerId)
 	local keys: { string } = {}
 	for ix = ixMin, ixMax do
 		for iz = izMin, izMax do
@@ -324,6 +329,11 @@ local function ensureCastleForPlayer(player: Player)
 	clone.Name = string.format("%s_%d", CASTLE_MODEL_NAME, player.UserId)
 	applyBuildingTextureForPlayer(clone, player)
 
+	-- Stamp affiliation + health for combat systems.
+	-- Use the same TeamId semantics as NPCs/players.
+	local teamId = getTeamIdForPlayer(player)
+	CastleHealthService.InitCastle(clone, teamId, player.UserId, 10000)
+
 	local castlePivotCf, spawnCf = computeCastleAndSpawnCFrames(baseplate, clone, cornerId)
 
 	pcall(function()
@@ -337,6 +347,16 @@ local function ensureCastleForPlayer(player: Player)
 		existing:Destroy()
 	end
 	clone.Parent = root
+
+	-- Store the grid-based footprint rectangle for AI targeting/distance checks.
+	local ixMin, ixMax, izMin, izMax = computeBlockedCellRectForCorner(baseplate, cornerId)
+	pcall(function()
+		clone:SetAttribute("CastleBlockIxMin", ixMin)
+		clone:SetAttribute("CastleBlockIxMax", ixMax)
+		clone:SetAttribute("CastleBlockIzMin", izMin)
+		clone:SetAttribute("CastleBlockIzMax", izMax)
+		clone:SetAttribute("CastleCornerId", cornerId)
+	end)
 
 	blockCastleCellsForPlayer(player, baseplate, cornerId)
 
@@ -415,5 +435,10 @@ end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- Hot-reload safety: if castles already exist, ensure health/billboard is initialized.
+pcall(function()
+	CastleHealthService.TryInitExisting()
+end)
 
 return {}

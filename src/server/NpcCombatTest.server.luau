@@ -11,6 +11,7 @@
 --   - Fallback: 1.5s cadence if marker isn't present
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
@@ -18,6 +19,8 @@ local RunService = game:GetService("RunService")
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local AnimationsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 local CombatParamsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
+
+local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
 
 local NPC_FOLDER_NAMES = { "NPC", "LiveNPC" }
 
@@ -109,6 +112,17 @@ local function getRootPart(model: Model): BasePart?
 	if hrp and hrp:IsA("BasePart") then
 		return hrp
 	end
+
+	local primary = model.PrimaryPart
+	if primary and primary:IsA("BasePart") then
+		return primary
+	end
+
+	local anyPart = model:FindFirstChildWhichIsA("BasePart", true)
+	if anyPart and anyPart:IsA("BasePart") then
+		return anyPart
+	end
+
 	return nil
 end
 
@@ -721,8 +735,18 @@ local function dealDamageNow(attacker: Model, target: Model)
 	if not attackerHumanoid or attackerHumanoid.Health <= 0 then
 		return
 	end
-	if not targetHumanoid or targetHumanoid.Health <= 0 then
-		return
+	local isCastle = CastleHealthService.IsCastle(target)
+	if targetHumanoid then
+		if targetHumanoid.Health <= 0 then
+			return
+		end
+	else
+		if not isCastle then
+			return
+		end
+		if CastleHealthService.IsDestroyed(target) then
+			return
+		end
 	end
 
 	local attackerRoot = getRootPart(attacker)
@@ -743,7 +767,11 @@ local function dealDamageNow(attacker: Model, target: Model)
 		return
 	end
 
-	targetHumanoid:TakeDamage(dmg)
+	if targetHumanoid then
+		targetHumanoid:TakeDamage(dmg)
+	else
+		CastleHealthService.ApplyDamage(target, dmg, attacker)
+	end
 end
 
 local function shootRangedNow(attacker: Model, target: Model)
@@ -920,6 +948,46 @@ end
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Include
 
+local function findNearestEnemyCastle(attacker: Model, radius: number): Model?
+	local attackerTeamId = Affiliation.GetTeamIdFromModel(attacker)
+	if attackerTeamId <= 0 then
+		return nil
+	end
+
+	local attackerRoot = getRootPart(attacker)
+	if not attackerRoot then
+		return nil
+	end
+
+	local buildings = Workspace:FindFirstChild("PlayerBuildings")
+	if not buildings then
+		return nil
+	end
+
+	local maxDist = radius + 2
+	local best: Model? = nil
+	local bestDist = math.huge
+
+	for _, child in ipairs(buildings:GetChildren()) do
+		if child:IsA("Model") and CastleHealthService.IsCastle(child) then
+			if not CastleHealthService.IsDestroyed(child) then
+				local teamId = Affiliation.GetTeamIdFromModel(child)
+				if teamId ~= attackerTeamId and teamId > 0 then
+					local root = getRootPart(child)
+					local pos = root and root.Position or child:GetPivot().Position
+					local dist = (pos - attackerRoot.Position).Magnitude
+					if dist <= maxDist and dist < bestDist then
+						bestDist = dist
+						best = child
+					end
+				end
+			end
+		end
+	end
+
+	return best
+end
+
 local function findNearestEnemyNpc(attacker: Model, radius: number): Model?
 	local attackerTeamId = Affiliation.GetTeamIdFromModel(attacker)
 	if attackerTeamId <= 0 then
@@ -1004,6 +1072,10 @@ local function stepNpc(attacker: Model)
 	local radius = resolveAttackRange(attacker)
 		or (if isRangedUnit(attacker) then RANGED_ATTACK_RADIUS else MELEE_ATTACK_RADIUS)
 	local target = findNearestEnemyNpc(attacker, radius)
+	if target == nil then
+		-- Variant 2: if no enemy NPC is in range, attack the nearest enemy castle.
+		target = findNearestEnemyCastle(attacker, radius)
+	end
 	local current = currentTargetByNpc[attacker]
 	if target == nil then
 		if current ~= nil then

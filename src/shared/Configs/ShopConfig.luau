@@ -59,7 +59,7 @@ local Config = {
 		},
 		["Cavalry_King"] = {
 			ItemKind = "npc",
-			Enabled = true,
+			Enabled = false,
 			NpcModelName = "SK_Cavalry_King",
 			Price = 23,
 			RobuxPrice = 23,
