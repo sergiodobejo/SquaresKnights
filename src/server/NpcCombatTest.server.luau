@@ -19,8 +19,88 @@ local RunService = game:GetService("RunService")
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local AnimationsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 local CombatParamsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
+local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
+
+local baseplate: BasePart? = nil
+local function getBaseplate(): BasePart?
+	if baseplate and baseplate.Parent == Workspace then
+		return baseplate
+	end
+	baseplate = GridCells.FindBaseplate()
+	return baseplate
+end
+
+type CastleRectLocal = {
+	xMin: number,
+	xMax: number,
+	zMin: number,
+	zMax: number,
+}
+
+local function getCastleRectLocal(bp: BasePart, castle: Model): CastleRectLocal?
+	local ixMin = castle:GetAttribute("CastleBlockIxMin")
+	local ixMax = castle:GetAttribute("CastleBlockIxMax")
+	local izMin = castle:GetAttribute("CastleBlockIzMin")
+	local izMax = castle:GetAttribute("CastleBlockIzMax")
+	if type(ixMin) ~= "number" or type(ixMax) ~= "number" or type(izMin) ~= "number" or type(izMax) ~= "number" then
+		return nil
+	end
+	ixMin = math.floor(ixMin)
+	ixMax = math.floor(ixMax)
+	izMin = math.floor(izMin)
+	izMax = math.floor(izMax)
+	if ixMax < ixMin or izMax < izMin then
+		return nil
+	end
+
+	local halfX = bp.Size.X / 2
+	local halfZ = bp.Size.Z / 2
+	local s = GridCells.SQUARE_SIZE_STUDS
+
+	local xMin = -halfX + (ixMin * s)
+	local xMax = -halfX + ((ixMax + 1) * s)
+	local zMin = -halfZ + (izMin * s)
+	local zMax = -halfZ + ((izMax + 1) * s)
+
+	return { xMin = xMin, xMax = xMax, zMin = zMin, zMax = zMax }
+end
+
+local function clamp(n: number, a: number, b: number): number
+	return math.clamp(n, math.min(a, b), math.max(a, b))
+end
+
+local function distanceToRectLocal(pointLocal: Vector3, rect: CastleRectLocal): number
+	local x = pointLocal.X
+	local z = pointLocal.Z
+	local clampedX = clamp(x, rect.xMin, rect.xMax)
+	local clampedZ = clamp(z, rect.zMin, rect.zMax)
+	local dx = x - clampedX
+	local dz = z - clampedZ
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+local function getCastleCenterWorld(bp: BasePart, rect: CastleRectLocal): Vector3
+	local x = (rect.xMin + rect.xMax) * 0.5
+	local z = (rect.zMin + rect.zMax) * 0.5
+	return (bp.CFrame * CFrame.new(x, 0, z)).Position
+end
+
+local function distanceToCastleBoundary(attackerWorldPos: Vector3, castle: Model): (number?, Vector3?)
+	local bp = getBaseplate()
+	if not bp then
+		return nil, nil
+	end
+	local rect = getCastleRectLocal(bp, castle)
+	if not rect then
+		return nil, nil
+	end
+	local attackerLocal = bp.CFrame:PointToObjectSpace(attackerWorldPos)
+	local dist = distanceToRectLocal(attackerLocal, rect)
+	local centerWorld = getCastleCenterWorld(bp, rect)
+	return dist, centerWorld
+end
 
 local NPC_FOLDER_NAMES = { "NPC", "LiveNPC" }
 
@@ -751,15 +831,39 @@ local function dealDamageNow(attacker: Model, target: Model)
 
 	local attackerRoot = getRootPart(attacker)
 	local targetRoot = getRootPart(target)
-	if not attackerRoot or not targetRoot then
+	if not attackerRoot then
+		return
+	end
+	if not targetRoot and not isCastle then
 		return
 	end
 
 	local range = resolveAttackRange(attacker)
 		or (if isRangedUnit(attacker) or isMageUnit(attacker) then RANGED_ATTACK_RADIUS else MELEE_ATTACK_RADIUS)
-	local dist = (targetRoot.Position - attackerRoot.Position).Magnitude
-	if dist > range + 2 then
-		return
+	if isCastle then
+		local distToBoundary = distanceToCastleBoundary(attackerRoot.Position, target)
+		if not distToBoundary then
+			-- Fallback to center/part distance if the castle has no grid rect attrs.
+			if not targetRoot then
+				return
+			end
+			local distFallback = (targetRoot.Position - attackerRoot.Position).Magnitude
+			if distFallback > range + 2 then
+				return
+			end
+		else
+			if distToBoundary > range + 2 then
+				return
+			end
+		end
+	else
+		if not targetRoot then
+			return
+		end
+		local dist = (targetRoot.Position - attackerRoot.Position).Magnitude
+		if dist > range + 2 then
+			return
+		end
 	end
 
 	local dmg = resolveDamage(attacker)
@@ -926,12 +1030,24 @@ end
 local function faceTarget(attacker: Model, target: Model)
 	local attackerRoot = getRootPart(attacker)
 	local targetRoot = getRootPart(target)
-	if not attackerRoot or not targetRoot then
+	if not attackerRoot then
 		return
 	end
-
 	local aPos = attackerRoot.Position
-	local tPos = targetRoot.Position
+	local tPos: Vector3? = nil
+
+	if CastleHealthService.IsCastle(target) then
+		local _, centerWorld = distanceToCastleBoundary(aPos, target)
+		if centerWorld then
+			tPos = centerWorld
+		end
+	end
+	if not tPos then
+		if not targetRoot then
+			return
+		end
+		tPos = targetRoot.Position
+	end
 	local flatDir = Vector3.new(tPos.X - aPos.X, 0, tPos.Z - aPos.Z)
 	if flatDir.Magnitude < 1e-4 then
 		return
@@ -973,9 +1089,13 @@ local function findNearestEnemyCastle(attacker: Model, radius: number): Model?
 			if not CastleHealthService.IsDestroyed(child) then
 				local teamId = Affiliation.GetTeamIdFromModel(child)
 				if teamId ~= attackerTeamId and teamId > 0 then
-					local root = getRootPart(child)
-					local pos = root and root.Position or child:GetPivot().Position
-					local dist = (pos - attackerRoot.Position).Magnitude
+					local distToBoundary, _ = distanceToCastleBoundary(attackerRoot.Position, child)
+					local dist = distToBoundary
+					if type(dist) ~= "number" then
+						local root = getRootPart(child)
+						local pos = root and root.Position or child:GetPivot().Position
+						dist = (pos - attackerRoot.Position).Magnitude
+					end
 					if dist <= maxDist and dist < bestDist then
 						bestDist = dist
 						best = child
