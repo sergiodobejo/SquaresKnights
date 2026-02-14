@@ -22,6 +22,7 @@ local CAPTURE_HIGHLIGHT_SECONDS = 5
 local CAPTURE_SPAWN_ITEM_KEY = "Priest"
 local CAPTURE_SPAWN_HEIGHT_ABOVE_SURFACE = 4.2
 local SKIP_CAPTURE_CHECK_ATTRIBUTE = "SkipCaptureCheck"
+local NPC_CELL_KEY_ATTRIBUTE = "CellKey"
 
 local OVERLAY_HEIGHT = 0.18
 local OVERLAY_Y_GAP = 0.02
@@ -745,6 +746,10 @@ function Shared.FinalizeReservation(key: string, npc: Model, baseplate: BasePart
 	marker:SetAttribute("OverlayColor3", overlayColor3)
 	marker:SetAttribute("Reserved", false)
 	marker:SetAttribute("Occupied", true)
+
+	pcall(function()
+		npc:SetAttribute(NPC_CELL_KEY_ATTRIBUTE, key)
+	end)
 
 	local overlay: BasePart? = nil
 	if baseplate then

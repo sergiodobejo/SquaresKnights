@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
+local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 10)
 if not remotesFolder then
@@ -22,6 +23,34 @@ local lastHealthByNpc: { [Model]: number } = (setmetatable({}, { __mode = "k" })
 local connByNpc: { [Model]: RBXScriptConnection } = (setmetatable({}, { __mode = "k" }) :: any)
 
 local HRP_NO_COLLISION_AFTER_SECONDS = 5
+local NPC_CELL_KEY_ATTRIBUTE = "CellKey"
+
+local function snapRootToCellCenterIfStamped(npc: Model, rootPart: BasePart)
+	local key = npc:GetAttribute(NPC_CELL_KEY_ATTRIBUTE)
+	if type(key) ~= "string" or key == "" then
+		return
+	end
+
+	local baseplate = GridCells.FindBaseplate()
+	if not baseplate then
+		return
+	end
+
+	local ix, iz = GridCells.ParseCellKey(key)
+	if ix == nil or iz == nil then
+		return
+	end
+
+	local center = GridCells.GetCellCenterWorld(baseplate, ix, iz)
+	local newPos = Vector3.new(center.X, rootPart.Position.Y, center.Z)
+	local rotOnly = rootPart.CFrame - rootPart.CFrame.Position
+
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	pcall(function()
+		rootPart.CFrame = rotOnly + newPos
+	end)
+end
 
 local function getHumanoid(model: Model): Humanoid?
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -61,6 +90,7 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 			pcall(function()
 				rootPart.CanCollide = false
 			end)
+			snapRootToCellCenterIfStamped(npc, rootPart)
 		end)
 	end
 
