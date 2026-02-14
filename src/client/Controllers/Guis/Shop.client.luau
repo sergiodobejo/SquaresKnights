@@ -1,6 +1,9 @@
 -- PATH: StarterPlayer.StarterPlayerScripts.Controllers.Guis.Shop
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local Workspace = game:GetService("Workspace")
 
 local GuiController = require(script.Parent.Parent.GuiController)
 local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
@@ -26,6 +29,15 @@ local Local = {}
 local Shared = {}
 
 local started = false
+
+-- When closing the shop on mobile, the same tap can be observed by our tap-to-open logic
+-- after Gui.Enabled flips to false. Suppress re-open briefly to avoid instant reopen.
+local suppressWorldTapUntil = 0
+
+function Local.CloseShop()
+	Gui.Enabled = false
+	suppressWorldTapUntil = os.clock() + 0.25
+end
 
 local occupancyFolder: Folder? = nil
 local capturedBlocksFolder: Folder? = nil
@@ -103,14 +115,176 @@ local function isCurrentCellBlocked(): boolean
 	return occupied or captured
 end
 
+local function getCellKeyAtViewportPosition(viewportPos: Vector2): string?
+	local baseplate = getBaseplate()
+	local camera = Workspace.CurrentCamera
+	if not baseplate or not camera then
+		return nil
+	end
+
+	local ray = camera:ViewportPointToRay(viewportPos.X, viewportPos.Y)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { baseplate }
+	params.IgnoreWater = true
+
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, params)
+	if not result then
+		return nil
+	end
+
+	local ix, iz = GridCells.GetCellIndexFromWorld(baseplate, result.Position)
+	if ix == nil or iz == nil then
+		return nil
+	end
+	return GridCells.GetCellKey(ix, iz)
+end
+
+local function getRayFromViewportPosition(viewportPos: Vector2): (Vector3?, Vector3?)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return nil, nil
+	end
+	local ray = camera:ViewportPointToRay(viewportPos.X, viewportPos.Y)
+	local dir = ray.Direction
+	local mag = dir.Magnitude
+	if mag <= 0 then
+		return nil, nil
+	end
+	return ray.Origin, dir / mag
+end
+
+local function isRayNearLocalCharacter(origin: Vector3, dirUnit: Vector3): boolean
+	local player = Players.LocalPlayer
+	local character = player.Character
+	if not character then
+		return false
+	end
+	local root = getRootPart(character)
+	if not root then
+		return false
+	end
+
+	-- If the ray hits the local character, treat it as a valid tap.
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { character }
+	params.IgnoreWater = true
+	local hit = Workspace:Raycast(origin, dirUnit * 2048, params)
+	if hit and hit.Instance and hit.Instance:IsDescendantOf(character) then
+		return true
+	end
+
+	-- Otherwise, allow taps that are "near" the character in 3D.
+	local v = root.Position - origin
+	local t = v:Dot(dirUnit)
+	if t < 0 then
+		return false
+	end
+	local closest = origin + dirUnit * t
+	local dist = (root.Position - closest).Magnitude
+	local TOUCH_NEAR_RADIUS_STUDS = 10
+	return dist <= TOUCH_NEAR_RADIUS_STUDS
+end
+
+local function shouldOpenFromViewportTap(viewportPos: Vector2, allowNearCharacter: boolean): boolean
+	local currentKey = getCurrentCellKeyUnderPlayer()
+	if not currentKey then
+		return false
+	end
+	if isCurrentCellBlocked() then
+		return false
+	end
+
+	local clickedKey = getCellKeyAtViewportPosition(viewportPos)
+	if clickedKey == currentKey then
+		return true
+	end
+
+	if allowNearCharacter then
+		local rayOrigin, rayDirUnit = getRayFromViewportPosition(viewportPos)
+		if rayOrigin and rayDirUnit then
+			return isRayNearLocalCharacter(rayOrigin, rayDirUnit)
+		end
+	end
+
+	return false
+end
+
 function Shared.OnStart()
 	if started then
 		return
 	end
 	started = true
 
-	OpenButton.MouseButton1Click:Connect(Local.UpdateEnabled)
-	Exit.MouseButton1Click:Connect(Local.UpdateEnabled)
+	if OpenButton:IsA("GuiButton") then
+		OpenButton.Activated:Connect(Local.UpdateEnabled)
+	end
+	if Exit:IsA("GuiButton") then
+		Exit.Activated:Connect(Local.UpdateEnabled)
+	end
+
+	-- Mouse: only open when clicking the same grid cell the player is standing on.
+	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+		if gameProcessed then
+			return
+		end
+		if Gui.Enabled then
+			return
+		end
+		if os.clock() < suppressWorldTapUntil then
+			return
+		end
+
+		local isClick = input.UserInputType == Enum.UserInputType.MouseButton1
+		if not isClick then
+			return
+		end
+
+		local mousePos = UserInputService:GetMouseLocation()
+		local inset = GuiService:GetGuiInset()
+		local viewportPos = Vector2.new(mousePos.X - inset.X, mousePos.Y - inset.Y)
+		if shouldOpenFromViewportTap(viewportPos, false) then
+			Gui.Enabled = true
+		end
+	end)
+
+	-- Touch: open when tapping the same cell OR tapping on/near the local character.
+	local function handleTouchTapPosition(pos: Vector2, processedByUI: boolean)
+		if processedByUI then
+			return
+		end
+		if Gui.Enabled then
+			return
+		end
+		if os.clock() < suppressWorldTapUntil then
+			return
+		end
+
+		-- Touch positions can be reported in screen coordinates; try both raw and inset-adjusted.
+		local inset = GuiService:GetGuiInset()
+		local rawViewportPos = Vector2.new(pos.X, pos.Y)
+		local insetViewportPos = Vector2.new(pos.X - inset.X, pos.Y - inset.Y)
+
+		if shouldOpenFromViewportTap(rawViewportPos, true) or shouldOpenFromViewportTap(insetViewportPos, true) then
+			Gui.Enabled = true
+		end
+	end
+
+	-- Prefer world-only touch taps so UI buttons (Exit) don't accidentally trigger opening.
+	UserInputService.TouchTapInWorld:Connect(function(pos: Vector2, processedByUI: boolean)
+		handleTouchTapPosition(pos, processedByUI)
+	end)
+
+	-- Fallback for environments where TouchTapInWorld is flaky.
+	UserInputService.TouchTap:Connect(function(touchPositions: { Vector2 }, processedByUI: boolean)
+		local pos = touchPositions[1]
+		if not pos then
+			return
+		end
+		handleTouchTapPosition(pos, processedByUI)
+	end)
 
 	Local.GenerateBuffButtons()
 end
@@ -121,11 +295,15 @@ function Local.UpdateEnabled()
 		-- Cannot open shop while standing on an occupied (or non-grid) cell.
 		if isCurrentCellBlocked() then
 			warn("[Shop] Cannot open shop: cell is occupied/reserved (or you are not on the grid)")
-			Gui.Enabled = false
+			Local.CloseShop()
 			return
 		end
 	end
-	Gui.Enabled = nextEnabled
+	if nextEnabled then
+		Gui.Enabled = true
+	else
+		Local.CloseShop()
+	end
 end
 
 local function findNpcTemplate(unitKind: any, unitClass: any): Model?
@@ -273,34 +451,42 @@ function Local.GenerateBuffButtons()
 			end
 		end
 
-		button.Buy.MouseButton1Click:Connect(function()
-			-- Close shop immediately on selection.
-			Gui.Enabled = false
+		if button:FindFirstChild("Buy") and button.Buy:IsA("GuiButton") then
+			button.Buy.Activated:Connect(function()
+				-- Close shop immediately on selection.
+				Local.CloseShop()
 			if isCurrentCellBlocked() then
 				warn("[Shop] Cannot spawn here: cell is occupied/reserved")
 				return
 			end
 			BuyItemRemote:FireServer(name)
-		end)
+			end)
+		end
 
 		-- Optional: DevProduct prompt flow (requires Remotes.PromptDevProduct and valid config.DevProductId)
 		local devProductId = tonumber(config.DevProductId)
 		if PromptDevProductRemote and devProductId and devProductId > 0 then
 			if button:FindFirstChild("BuyRobux") then
-				button.BuyRobux.MouseButton1Click:Connect(function()
+				if button.BuyRobux:IsA("GuiButton") then
+					button.BuyRobux.Activated:Connect(function()
 					PromptDevProductRemote:FireServer(devProductId)
-				end)
+					end)
+				end
 			end
 			if button:FindFirstChild("Icon") then
-				button.Icon.MouseButton1Click:Connect(function()
+				if button.Icon:IsA("GuiButton") then
+					button.Icon.Activated:Connect(function()
 					PromptDevProductRemote:FireServer(devProductId)
-				end)
+					end)
+				end
 			end
 		elseif button:FindFirstChild("BuyRobux") then
 			-- Make it explicit in output why nothing happens
-			button.BuyRobux.MouseButton1Click:Connect(function()
-				warn("[Shop] BuyRobux clicked, but PromptDevProduct/DevProductId is not configured")
-			end)
+			if button.BuyRobux:IsA("GuiButton") then
+				button.BuyRobux.Activated:Connect(function()
+					warn("[Shop] BuyRobux clicked, but PromptDevProduct/DevProductId is not configured")
+				end)
+			end
 		end
 	end
 
