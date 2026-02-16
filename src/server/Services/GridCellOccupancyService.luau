@@ -341,33 +341,36 @@ local function isRegionEnclosedByPlayer(regionKeys: { string }, regionSet: { [st
 			return false
 		end
 
-		-- Check boundary in 8-neighborhood.
-		for dx = -1, 1 do
-			for dz = -1, 1 do
-				if dx == 0 and dz == 0 then
-					continue
-				end
-				local nx = (ix :: number) + dx
-				local nz = (iz :: number) + dz
-				if not withinBounds(nx, nz, cellsX, cellsZ) then
-					-- If region doesn't touch border, this shouldn't happen.
-					return false
-				end
-
-				local nKey = GridCells.GetCellKey(nx, nz)
-				if regionSet[nKey] then
-					continue
-				end
-
-				if isTrulyEmptyKey(nKey) then
-					continue
-				end
-
-				-- Any non-empty neighbor must be player's occupied cell.
-				if not isWallOfPlayer(nx, nz, userId, cellsX, cellsZ) then
-					return false
-				end
+		-- Check boundary in 4-neighborhood only (diagonals do not affect capture).
+		local function checkNeighbor(nx: number, nz: number): boolean
+			if not withinBounds(nx, nz, cellsX, cellsZ) then
+				-- If region doesn't touch border, this shouldn't happen.
+				return false
 			end
+			local nKey = GridCells.GetCellKey(nx, nz)
+			if regionSet[nKey] then
+				return true
+			end
+			if isTrulyEmptyKey(nKey) then
+				return true
+			end
+			-- Any non-empty neighbor must be player's occupied cell.
+			return isWallOfPlayer(nx, nz, userId, cellsX, cellsZ)
+		end
+
+		local x = ix :: number
+		local z = iz :: number
+		if not checkNeighbor(x - 1, z) then
+			return false
+		end
+		if not checkNeighbor(x + 1, z) then
+			return false
+		end
+		if not checkNeighbor(x, z - 1) then
+			return false
+		end
+		if not checkNeighbor(x, z + 1) then
+			return false
 		end
 	end
 
@@ -415,39 +418,39 @@ local function getEnclosureFailureSummary(regionKeys: { string }, regionSet: { [
 		if ix == nil or iz == nil then
 			return "badKey"
 		end
-		for dx = -1, 1 do
-			for dz = -1, 1 do
-				if dx == 0 and dz == 0 then
-					continue
-				end
-				local nx = (ix :: number) + dx
-				local nz = (iz :: number) + dz
-				if not withinBounds(nx, nz, cellsX, cellsZ) then
-					counts.outOfBounds = (counts.outOfBounds or 0) + 1
-					if not sample then
-						sample = string.format("oob neighbor at %s -> (%d,%d)", key, nx, nz)
-					end
-					continue
-				end
-
-				local nKey = GridCells.GetCellKey(nx, nz)
-				if regionSet[nKey] then
-					continue
-				end
-				if isTrulyEmptyKey(nKey) then
-					continue
-				end
-				if isWallOfPlayer(nx, nz, userId, cellsX, cellsZ) then
-					continue
-				end
-
-				local reason = getNonWallReasonForKey(nKey, userId)
-				counts[reason] = (counts[reason] or 0) + 1
+		local function checkNeighbor(nx: number, nz: number)
+			if not withinBounds(nx, nz, cellsX, cellsZ) then
+				counts.outOfBounds = (counts.outOfBounds or 0) + 1
 				if not sample then
-					sample = string.format("non-wall neighbor %s at (%d,%d) touching region cell %s", reason, nx, nz, key)
+					sample = string.format("oob neighbor at %s -> (%d,%d)", key, nx, nz)
 				end
+				return
+			end
+
+			local nKey = GridCells.GetCellKey(nx, nz)
+			if regionSet[nKey] then
+				return
+			end
+			if isTrulyEmptyKey(nKey) then
+				return
+			end
+			if isWallOfPlayer(nx, nz, userId, cellsX, cellsZ) then
+				return
+			end
+
+			local reason = getNonWallReasonForKey(nKey, userId)
+			counts[reason] = (counts[reason] or 0) + 1
+			if not sample then
+				sample = string.format("non-wall neighbor %s at (%d,%d) touching region cell %s", reason, nx, nz, key)
 			end
 		end
+
+		local x = ix :: number
+		local z = iz :: number
+		checkNeighbor(x - 1, z)
+		checkNeighbor(x + 1, z)
+		checkNeighbor(x, z - 1)
+		checkNeighbor(x, z + 1)
 	end
 
 	local pieces: { string } = {}
