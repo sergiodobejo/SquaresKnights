@@ -10,6 +10,12 @@ Shared.Attributes = {
 	TeamColor = "TeamColor",
 }
 
+local RESERVED_FOR_AI_COLOR = "blue"
+
+local function isPlayerAssignableColor(colorName: any): boolean
+	return type(colorName) == "string" and colorName ~= "" and colorName:lower() ~= RESERVED_FOR_AI_COLOR
+end
+
 local function collectColorNames(): { string }
 	local names = {}
 	for colorName in pairs(TeamTextures) do
@@ -50,7 +56,12 @@ for i, name in ipairs(ALL_COLORS) do
 	TEAM_ID_TO_COLOR_NAME[i] = name
 end
 
-local availableColors: { string } = table.clone(ALL_COLORS)
+local availableColors: { string } = {}
+for _, name in ipairs(ALL_COLORS) do
+	if isPlayerAssignableColor(name) then
+		table.insert(availableColors, name)
+	end
+end
 local assignedByUserId: { [number]: string } = {}
 
 local rng = Random.new()
@@ -76,7 +87,7 @@ end
 
 function Shared.GetColorForPlayer(player: Player): string?
 	local attr = player:GetAttribute(Shared.Attributes.TeamColor)
-	if type(attr) == "string" and attr ~= "" then
+	if type(attr) == "string" and attr ~= "" and attr:lower() ~= RESERVED_FOR_AI_COLOR then
 		return attr
 	end
 	return assignedByUserId[player.UserId]
@@ -94,8 +105,14 @@ local function assignColorInternal(player: Player): string
 		chosen = table.remove(availableColors, idx) :: string
 	else
 		-- Should not happen in your constraints (players <= colors).
-		if #ALL_COLORS > 0 then
-			chosen = ALL_COLORS[rng:NextInteger(1, #ALL_COLORS)]
+		local fallback: { string } = {}
+		for _, name in ipairs(ALL_COLORS) do
+			if isPlayerAssignableColor(name) then
+				table.insert(fallback, name)
+			end
+		end
+		if #fallback > 0 then
+			chosen = fallback[rng:NextInteger(1, #fallback)]
 		else
 			chosen = "red"
 		end
@@ -125,7 +142,9 @@ function Shared.ReleasePlayer(player: Player)
 	end
 
 	assignedByUserId[userId] = nil
-	table.insert(availableColors, colorName)
+	if isPlayerAssignableColor(colorName) then
+		table.insert(availableColors, colorName)
+	end
 
 	-- Optional: keep attributes for debugging after leave; Roblox will destroy player anyway.
 end

@@ -12,7 +12,9 @@ local OWNER_USER_ID_ATTR = "OwnerUserId"
 
 local GUI_NAME = "CastleHealthBillboard"
 
-local DEFAULT_MAX_HEALTH = 10000
+local DEFAULT_MAX_HEALTH = 1000
+
+local castleDestroyedBindable = Instance.new("BindableEvent")
 
 local function getAnyBasePart(model: Model): BasePart?
 	local primary = model.PrimaryPart
@@ -92,6 +94,21 @@ end
 local connectionsByCastle: { [Model]: { RBXScriptConnection } } = setmetatable({}, { __mode = "k" }) :: any
 
 local Shared = {}
+
+function Shared.GetOwnerUserId(castle: Model): number
+	local v = castle:GetAttribute(OWNER_USER_ID_ATTR)
+	if type(v) ~= "number" then
+		return 0
+	end
+	if v ~= v or v <= 0 then
+		return 0
+	end
+	return math.floor(v)
+end
+
+function Shared.OnCastleDestroyed(callback: (castle: Model, ownerUserId: number, teamId: number) -> ())
+	return castleDestroyedBindable.Event:Connect(callback)
+end
 
 function Shared.IsCastle(model: Instance): boolean
 	return model:IsA("Model") and string.find(model.Name, "SM_Castle_", 1, true) ~= nil
@@ -216,6 +233,12 @@ function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boo
 
 	if nextHealth <= 0 then
 		castle:SetAttribute(DESTROYED_ATTR, true)
+		local ownerUserId = Shared.GetOwnerUserId(castle)
+		local teamId = Shared.GetCastleTeamId(castle)
+		-- Fire after marking destroyed but before model destruction.
+		task.defer(function()
+			castleDestroyedBindable:Fire(castle, ownerUserId, teamId)
+		end)
 		-- Destroy the model; CastleSpawnOnJoin listens for removal to unblock grid.
 		task.defer(function()
 			if castle.Parent then

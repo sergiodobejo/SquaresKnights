@@ -12,6 +12,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
@@ -20,8 +21,60 @@ local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local AnimationsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 local CombatParamsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("ShopConfig"))
+local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
+local PlayerDataService = require(ServerScriptService.Services:WaitForChild("PlayerDataService"))
+
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 10)
+local npcDamagePopupRemote: RemoteEvent? = nil
+if remotesFolder then
+	local inst = remotesFolder:WaitForChild(RemoteNames.NpcDamagePopup, 10)
+	if inst and inst:IsA("RemoteEvent") then
+		npcDamagePopupRemote = inst :: RemoteEvent
+	else
+		warn(string.format(
+			"[NpcCombatTest] Missing RemoteEvent ReplicatedStorage/Remotes/%s (needed for coin popup)",
+			tostring(RemoteNames.NpcDamagePopup)
+		))
+	end
+else
+	warn("[NpcCombatTest] Missing ReplicatedStorage/Remotes folder (needed for coin popup)")
+end
+
+local LAST_HIT_TEAM_ID_ATTRIBUTE = "LastHitTeamId"
+local LAST_HIT_OWNER_USER_ID_ATTRIBUTE = "LastHitOwnerUserId"
+local LAST_HIT_AT_ATTRIBUTE = "LastHitAt"
+local COIN_REWARD_GIVEN_ATTRIBUTE = "KillCoinRewardGiven"
+
+local function normalizePositiveInt(value: any): number
+	if type(value) ~= "number" then
+		return 0
+	end
+	if value ~= value or value <= 0 then
+		return 0
+	end
+	return math.floor(value)
+end
+
+local function getPlayerByUserId(userId: number): Player?
+	local getter = (Players :: any).GetPlayerByUserId
+	if type(getter) == "function" then
+		local ok, result = pcall(function()
+			return getter(Players, userId)
+		end)
+		if ok and result and result:IsA("Player") then
+			return result :: Player
+		end
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.UserId == userId then
+			return p
+		end
+	end
+	return nil
+end
 
 local baseplate: BasePart? = nil
 local function getBaseplate(): BasePart?
@@ -668,6 +721,40 @@ local function playDeathAndCleanup(npc: Model)
 	end
 	deathCleanupScheduledByNpc[npc] = true
 
+	-- Award coins to the owner of the killer team (1/3 of shop price, rounded up).
+	-- Runs once per NPC death.
+	local alreadyRewarded = npc:GetAttribute(COIN_REWARD_GIVEN_ATTRIBUTE)
+	if alreadyRewarded ~= true then
+		pcall(function()
+			npc:SetAttribute(COIN_REWARD_GIVEN_ATTRIBUTE, true)
+		end)
+
+		local killerTeamId = normalizePositiveInt(npc:GetAttribute(LAST_HIT_TEAM_ID_ATTRIBUTE))
+		local killerOwnerUserId = normalizePositiveInt(npc:GetAttribute(LAST_HIT_OWNER_USER_ID_ATTRIBUTE))
+		local lastHitAt = npc:GetAttribute(LAST_HIT_AT_ATTRIBUTE)
+		local lastHitAgeOk = (type(lastHitAt) == "number") and ((os.clock() - lastHitAt) <= 10)
+
+		local deadTeamId = Affiliation.GetTeamIdFromModel(npc)
+		local deadOwnerUserId = Affiliation.GetOwnerUserIdFromModel(npc)
+
+		if lastHitAgeOk and killerTeamId > 0 and killerOwnerUserId > 0 and killerTeamId ~= deadTeamId then
+			if deadOwnerUserId <= 0 or deadOwnerUserId ~= killerOwnerUserId then
+				local price = ShopConfig.GetPriceForNpcModelName(npc.Name)
+				if type(price) == "number" and price > 0 then
+					local reward = math.ceil(price / 5)
+					local killerPlayer = getPlayerByUserId(killerOwnerUserId)
+					if killerPlayer and reward > 0 then
+						PlayerDataService.AddCoins(killerPlayer, reward)
+
+						if npcDamagePopupRemote then
+							npcDamagePopupRemote:FireClient(killerPlayer, npc, reward, string.format("+ %d Coins", reward), nil, "coins")
+						end
+					end
+				end
+			end
+		end
+	end
+
 	pcall(function()
 		npc:SetAttribute("Dying", true)
 	end)
@@ -869,6 +956,18 @@ local function dealDamageNow(attacker: Model, target: Model)
 	local dmg = resolveDamage(attacker)
 	if not dmg then
 		return
+	end
+
+	-- Stamp last-hitter so we can award coins on death.
+	if targetHumanoid then
+		local attackerOwnerUserId = Affiliation.GetOwnerUserIdFromModel(attacker)
+		if attackerOwnerUserId > 0 then
+			pcall(function()
+				target:SetAttribute(LAST_HIT_TEAM_ID_ATTRIBUTE, attackerTeamId)
+				target:SetAttribute(LAST_HIT_OWNER_USER_ID_ATTRIBUTE, attackerOwnerUserId)
+				target:SetAttribute(LAST_HIT_AT_ATTRIBUTE, os.clock())
+			end)
+		end
 	end
 
 	if targetHumanoid then

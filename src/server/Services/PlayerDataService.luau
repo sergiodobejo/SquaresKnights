@@ -1,5 +1,5 @@
 -- ServerScriptService.Services.PlayerDataService
--- Minimal persistence for coins + buffs (DataStore)
+-- Minimal persistence for buffs + codes (DataStore)
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -12,10 +12,9 @@ local PlayerDataService = {}
 
 local STORE = DataStoreService:GetDataStore("PlayerDataV1")
 
-local DEFAULT_COINS = 200
+local DEFAULT_COINS = 10
 
 export type PlayerState = {
-	coins: number,
 	buffs: any,
 	codes: { [string]: boolean }?,
 }
@@ -64,15 +63,15 @@ local function load(player: Player)
 
 	if type(data) ~= "table" then
 		data = {
-			coins = DEFAULT_COINS,
 			buffs = {},
 			codes = {},
 		}
 	end
 
-	if type(data.coins) ~= "number" then
-		data.coins = DEFAULT_COINS
-	end
+	-- Coins are intentionally NOT persisted. Always reset to default on join.
+	local anyData = data :: any
+	anyData.coins = nil
+
 	if type(data.buffs) ~= "table" then
 		data.buffs = {}
 	end
@@ -83,7 +82,7 @@ local function load(player: Player)
 	StateByUserId[userId] = data
 
 	local coinsValue = ensureLeaderstats(player)
-	coinsValue.Value = math.floor(data.coins)
+	coinsValue.Value = DEFAULT_COINS
 
 	BuffStateService.LoadFromState(player, data.buffs)
 
@@ -112,13 +111,9 @@ local function save(player: Player)
 		return
 	end
 
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local coinsValue = leaderstats and leaderstats:FindFirstChild("Coins")
-	if coinsValue and coinsValue:IsA("IntValue") then
-		state.coins = coinsValue.Value
-	end
-
 	state.buffs = BuffStateService.ExportForSave(player)
+	local anyState = state :: any
+	anyState.coins = nil
 
 	local ok, err = pcall(function()
 		STORE:SetAsync(keyFor(userId), state)
