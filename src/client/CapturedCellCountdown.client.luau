@@ -13,6 +13,11 @@ local TEXT_SIZE = 18
 local MAX_DISTANCE = 120
 local GUI_SIZE = UDim2.fromOffset(40, 40)
 
+local CAPTURED_TEXT = "Captured"
+local CAPTURED_PLATE_THICKNESS = 0.05
+local CAPTURED_PLATE_Y_OFFSET = 0.02
+local CAPTURED_PIXELS_PER_STUD = 48
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -36,6 +41,9 @@ type Entry = {
 	attachment: Attachment,
 	gui: BillboardGui,
 	label: TextLabel,
+	plate: BasePart,
+	surfaceGui: SurfaceGui,
+	surfaceLabel: TextLabel,
 	lastRemaining: number,
 }
 
@@ -53,6 +61,67 @@ local function destroyEntry(key: string)
 	pcall(function()
 		entry.attachment:Destroy()
 	end)
+	pcall(function()
+		entry.plate:Destroy()
+	end)
+end
+
+local function getHintRotationForLocalPlayer(): number
+	local cornerId = player:GetAttribute("CornerId")
+	if type(cornerId) ~= "number" then
+		return 0
+	end
+	cornerId = math.floor(cornerId)
+	if cornerId == 1 or cornerId == 2 then
+		return 180
+	end
+	return 0
+end
+
+local function createCapturedPlate(bp: BasePart, key: string, ix: number, iz: number): (BasePart, SurfaceGui, TextLabel)
+	local xCenter, zCenter = GridCells.GetCellCenterLocalXZ(bp, ix, iz)
+	local yLocal = (bp.Size.Y / 2) + (CAPTURED_PLATE_THICKNESS / 2) + CAPTURED_PLATE_Y_OFFSET
+
+	local plate = Instance.new("Part")
+	plate.Name = "CapturedCellPlate_" .. key
+	plate.Anchored = true
+	plate.CanCollide = false
+	plate.CanTouch = false
+	plate.CanQuery = false
+	plate.CastShadow = false
+	plate.Transparency = 1
+	plate.Material = Enum.Material.SmoothPlastic
+	plate.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, CAPTURED_PLATE_THICKNESS, GridCells.SQUARE_SIZE_STUDS)
+	plate.CFrame = bp.CFrame * CFrame.new(xCenter, yLocal, zCenter)
+	plate.Locked = true
+	plate.Parent = bp
+
+	local surfaceGui = Instance.new("SurfaceGui")
+	surfaceGui.Name = "CapturedCellSurfaceGui_" .. key
+	surfaceGui.Adornee = plate
+	surfaceGui.Face = Enum.NormalId.Top
+	surfaceGui.AlwaysOnTop = false
+	surfaceGui.LightInfluence = 0
+	surfaceGui.ResetOnSpawn = false
+	surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	surfaceGui.PixelsPerStud = CAPTURED_PIXELS_PER_STUD
+	surfaceGui.Enabled = false
+	surfaceGui.Parent = plate
+
+	local surfaceLabel = Instance.new("TextLabel")
+	surfaceLabel.Name = "Text"
+	surfaceLabel.BackgroundTransparency = 1
+	surfaceLabel.Size = UDim2.fromScale(1, 1)
+	surfaceLabel.Text = CAPTURED_TEXT
+	surfaceLabel.TextScaled = true
+	surfaceLabel.TextWrapped = true
+	surfaceLabel.Font = Enum.Font.LuckiestGuy
+	surfaceLabel.TextColor3 = Color3.new(1, 1, 1)
+	surfaceLabel.TextStrokeTransparency = 0.25
+	surfaceLabel.Rotation = getHintRotationForLocalPlayer()
+	surfaceLabel.Parent = surfaceGui
+
+	return plate, surfaceGui, surfaceLabel
 end
 
 local function computeRemaining(marker: Instance): number?
@@ -111,12 +180,17 @@ local function createEntryForMarker(marker: Instance)
 	label.Text = ""
 	label.Parent = gui
 
+	local plate, surfaceGui, surfaceLabel = createCapturedPlate(bp, key, ix, iz)
+
 	entriesByKey[key] = {
 		key = key,
 		marker = marker,
 		attachment = attach,
 		gui = gui,
 		label = label,
+		plate = plate,
+		surfaceGui = surfaceGui,
+		surfaceLabel = surfaceLabel,
 		lastRemaining = -1,
 	}
 end
@@ -131,14 +205,17 @@ local function refreshAll()
 		if remaining == nil then
 			-- If the server didn't set ExpiresAt (or it hasn't replicated yet), hide until it does.
 			entry.gui.Enabled = false
+			entry.surfaceGui.Enabled = false
 			continue
 		end
 		if remaining <= 0 then
 			-- Let ChildRemoved do cleanup, but hide immediately.
 			entry.gui.Enabled = false
+			entry.surfaceGui.Enabled = false
 			continue
 		end
 		entry.gui.Enabled = true
+		entry.surfaceGui.Enabled = true
 		if remaining ~= entry.lastRemaining then
 			entry.lastRemaining = remaining
 			entry.label.Text = tostring(remaining)
