@@ -485,6 +485,11 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 			marker.Name = key
 			marker.Parent = capturedBlocksFolder
 		end
+		pcall(function()
+			local m = marker :: Instance
+			m:SetAttribute("CaptureColor", color3)
+			m:SetAttribute("CaptureOwnerUserId", userId)
+		end)
 		local newExpiresAt = getCaptureExpiresAt()
 		local existingExpiresAt = marker:GetAttribute("ExpiresAt")
 		if type(existingExpiresAt) ~= "number" or existingExpiresAt < newExpiresAt then
@@ -499,7 +504,7 @@ local function highlightCapturedRegion(baseplate: BasePart, userId: number, colo
 			p.CanCollide = false
 			p.CanQuery = false
 			p.CanTouch = false
-			p.Material = Enum.Material.Neon
+			p.Material = Enum.Material.SmoothPlastic
 			p.Color = color3
 			p.Transparency = CAPTURE_OVERLAY_TRANSPARENCY
 			p.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, CAPTURE_OVERLAY_HEIGHT, GridCells.SQUARE_SIZE_STUDS)

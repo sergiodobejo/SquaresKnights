@@ -15,8 +15,12 @@ local GUI_SIZE = UDim2.fromOffset(40, 40)
 
 local CAPTURED_TEXT = "Captured"
 local CAPTURED_PLATE_THICKNESS = 0.05
-local CAPTURED_PLATE_Y_OFFSET = 0.02
+-- Place above the server-side captured overlay (keeps existing overlay intact).
+local CAPTURED_PLATE_Y_OFFSET = 0.44
 local CAPTURED_PIXELS_PER_STUD = 48
+
+local CAPTURED_DIAGONAL_ROT_A = 45
+local CAPTURED_DIAGONAL_ROT_B = -45
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -44,6 +48,7 @@ type Entry = {
 	plate: BasePart,
 	surfaceGui: SurfaceGui,
 	surfaceLabel: TextLabel,
+	diagonalRotation: number,
 	lastRemaining: number,
 }
 
@@ -78,9 +83,37 @@ local function getHintRotationForLocalPlayer(): number
 	return 0
 end
 
-local function createCapturedPlate(bp: BasePart, key: string, ix: number, iz: number): (BasePart, SurfaceGui, TextLabel)
+local function computeLuminance(c: Color3): number
+	return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B)
+end
+
+local function applyCapturedTextStyle(label: TextLabel, marker: Instance)
+	local captureColor = marker:GetAttribute("CaptureColor")
+	if typeof(captureColor) == "Color3" then
+		local lum = computeLuminance(captureColor)
+		if lum >= 0.72 then
+			-- Bright (e.g. white team): use a dark text color so it reads on light fills.
+			label.TextColor3 = Color3.fromRGB(25, 25, 25)
+			label.TextStrokeColor3 = Color3.new(0, 0, 0)
+			label.TextStrokeTransparency = 0
+		else
+			-- Darker colors: white text with black stroke.
+			label.TextColor3 = Color3.new(1, 1, 1)
+			label.TextStrokeColor3 = Color3.new(0, 0, 0)
+			label.TextStrokeTransparency = 0
+		end
+	else
+		-- Fallback if attributes haven't replicated yet.
+		label.TextColor3 = Color3.new(1, 1, 1)
+		label.TextStrokeColor3 = Color3.new(0, 0, 0)
+		label.TextStrokeTransparency = 0
+	end
+end
+
+local function createCapturedPlate(bp: BasePart, key: string, ix: number, iz: number): (BasePart, SurfaceGui, TextLabel, number)
 	local xCenter, zCenter = GridCells.GetCellCenterLocalXZ(bp, ix, iz)
 	local yLocal = (bp.Size.Y / 2) + (CAPTURED_PLATE_THICKNESS / 2) + CAPTURED_PLATE_Y_OFFSET
+	local diagonalRotation = if ((ix + iz) % 2) == 0 then CAPTURED_DIAGONAL_ROT_A else CAPTURED_DIAGONAL_ROT_B
 
 	local plate = Instance.new("Part")
 	plate.Name = "CapturedCellPlate_" .. key
@@ -111,17 +144,21 @@ local function createCapturedPlate(bp: BasePart, key: string, ix: number, iz: nu
 	local surfaceLabel = Instance.new("TextLabel")
 	surfaceLabel.Name = "Text"
 	surfaceLabel.BackgroundTransparency = 1
-	surfaceLabel.Size = UDim2.fromScale(1, 1)
+	surfaceLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	surfaceLabel.Position = UDim2.fromScale(0.5, 0.5)
+	surfaceLabel.Size = UDim2.fromScale(1.3, 1.3)
 	surfaceLabel.Text = CAPTURED_TEXT
 	surfaceLabel.TextScaled = true
 	surfaceLabel.TextWrapped = true
 	surfaceLabel.Font = Enum.Font.LuckiestGuy
+	-- Colors/stroke are applied after we have the marker (CaptureColor attribute may replicate later).
 	surfaceLabel.TextColor3 = Color3.new(1, 1, 1)
-	surfaceLabel.TextStrokeTransparency = 0.25
-	surfaceLabel.Rotation = getHintRotationForLocalPlayer()
+	surfaceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	surfaceLabel.TextStrokeTransparency = 0
+	surfaceLabel.Rotation = getHintRotationForLocalPlayer() + diagonalRotation
 	surfaceLabel.Parent = surfaceGui
 
-	return plate, surfaceGui, surfaceLabel
+	return plate, surfaceGui, surfaceLabel, diagonalRotation
 end
 
 local function computeRemaining(marker: Instance): number?
@@ -180,7 +217,8 @@ local function createEntryForMarker(marker: Instance)
 	label.Text = ""
 	label.Parent = gui
 
-	local plate, surfaceGui, surfaceLabel = createCapturedPlate(bp, key, ix, iz)
+	local plate, surfaceGui, surfaceLabel, diagonalRotation = createCapturedPlate(bp, key, ix, iz)
+	applyCapturedTextStyle(surfaceLabel, marker)
 
 	entriesByKey[key] = {
 		key = key,
@@ -191,6 +229,7 @@ local function createEntryForMarker(marker: Instance)
 		plate = plate,
 		surfaceGui = surfaceGui,
 		surfaceLabel = surfaceLabel,
+		diagonalRotation = diagonalRotation,
 		lastRemaining = -1,
 	}
 end
@@ -216,6 +255,8 @@ local function refreshAll()
 		end
 		entry.gui.Enabled = true
 		entry.surfaceGui.Enabled = true
+		entry.surfaceLabel.Rotation = getHintRotationForLocalPlayer() + entry.diagonalRotation
+		applyCapturedTextStyle(entry.surfaceLabel, entry.marker)
 		if remaining ~= entry.lastRemaining then
 			entry.lastRemaining = remaining
 			entry.label.Text = tostring(remaining)
