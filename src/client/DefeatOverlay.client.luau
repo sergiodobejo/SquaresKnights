@@ -12,6 +12,10 @@ local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local defeatedRemote = remotesFolder:WaitForChild(RemoteNames.PlayerDefeated) :: RemoteEvent
 
 local GUI_NAME = "DefeatOverlay"
+local DEFAULT_TEXT = "You have been defeated."
+local DEFAULT_MAX_TEXT_SIZE = 140
+
+local hideToken = 0
 
 local function ensureGui(): ScreenGui
 	local existing = playerGui:FindFirstChild(GUI_NAME)
@@ -31,7 +35,7 @@ local function ensureGui(): ScreenGui
 	label.Size = UDim2.fromScale(1, 1)
 	label.Position = UDim2.fromScale(0, 0)
 	label.AnchorPoint = Vector2.new(0, 0)
-	label.Text = "You have been defeated."
+	label.Text = DEFAULT_TEXT
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.TextStrokeTransparency = 0.2
 	label.Font = Enum.Font.LuckiestGuy
@@ -40,7 +44,7 @@ local function ensureGui(): ScreenGui
 	label.Parent = gui
 
 	local constraint = Instance.new("UITextSizeConstraint")
-	constraint.MaxTextSize = 140
+	constraint.MaxTextSize = DEFAULT_MAX_TEXT_SIZE
 	constraint.MinTextSize = 24
 	constraint.Parent = label
 
@@ -49,11 +53,29 @@ local function ensureGui(): ScreenGui
 	return gui
 end
 
-local function show()
+local function show(message: string?, durationSeconds: number?)
 	local gui = ensureGui()
+	local label = gui:FindFirstChild("Label")
+	if label and label:IsA("TextLabel") then
+		(label :: TextLabel).Text = if type(message) == "string" and message ~= "" then message else DEFAULT_TEXT
+	end
+
+	hideToken += 1
+	local tokenAtShow = hideToken
 	gui.Enabled = true
+
+	if type(durationSeconds) == "number" and durationSeconds > 0 then
+		task.delay(durationSeconds, function()
+			if tokenAtShow ~= hideToken then
+				return
+			end
+			if gui and gui.Parent then
+				gui.Enabled = false
+			end
+		end)
+	end
 end
 
-defeatedRemote.OnClientEvent:Connect(function()
-	show()
+defeatedRemote.OnClientEvent:Connect(function(message: string?, durationSeconds: number?)
+	show(message, durationSeconds)
 end)
