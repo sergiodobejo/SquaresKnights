@@ -19,7 +19,7 @@ local BASEPLATE_NAME = "Baseplate"
 local BUILDINGS_FOLDER_NAME = "Buildings"
 local CASTLE_MODEL_NAME = "SM_Castle"
 
-local CASTLE_MARGIN = 8
+local CASTLE_MARGIN = 0
 local SPAWN_MARGIN = 14
 local SPAWN_HEIGHT = 4
 
@@ -195,7 +195,7 @@ local spawnCFrameByUserId: { [number]: CFrame } = {}
 
 local blockedCellKeysByUserId: { [number]: { string } } = {}
 
-local CASTLE_BLOCK_INSET_CELLS = 1
+local CASTLE_BLOCK_INSET_CELLS = 0
 local CASTLE_BLOCK_SIZE_CELLS = 2
 
 local function unblockCastleCellsForUserId(userId: number)
