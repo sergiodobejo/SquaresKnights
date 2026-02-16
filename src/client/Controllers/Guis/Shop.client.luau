@@ -52,6 +52,10 @@ local function getBaseplate(): BasePart?
 	return nil
 end
 
+local VIEWPORT_RAY_DISTANCE = 50000
+
+local MOUSE_CELL_SCREEN_TOLERANCE_PX = 32
+
 local function getRootPart(character: Model?): BasePart?
 	if not character then
 		return nil
@@ -129,7 +133,7 @@ local function getCellKeyAtViewportPosition(viewportPos: Vector2): string?
 	params.FilterDescendantsInstances = { baseplate }
 	params.IgnoreWater = true
 
-	local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, params)
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * VIEWPORT_RAY_DISTANCE, params)
 	if not result then
 		return nil
 	end
@@ -139,6 +143,35 @@ local function getCellKeyAtViewportPosition(viewportPos: Vector2): string?
 		return nil
 	end
 	return GridCells.GetCellKey(ix, iz)
+end
+
+local function isViewportPosNearCurrentCellCenter(viewportPos: Vector2, tolerancePx: number): boolean
+	if tolerancePx <= 0 then
+		return false
+	end
+
+	local baseplate = getBaseplate()
+	local camera = Workspace.CurrentCamera
+	local root = getRootPart(Players.LocalPlayer.Character)
+	if not baseplate or not camera or not root then
+		return false
+	end
+
+	local ix, iz = GridCells.GetCellIndexFromWorld(baseplate, root.Position)
+	if ix == nil or iz == nil then
+		return false
+	end
+	-- Use a point on the top surface of the baseplate (where the click ray actually hits),
+	-- not the baseplate's center plane.
+	local cellCenterWorld = GridCells.GetCellCFrameOnTop(baseplate, ix, iz, 0).Position
+	local screenPos, onScreen = camera:WorldToViewportPoint(cellCenterWorld)
+	if not onScreen then
+		return false
+	end
+
+	local dx = viewportPos.X - screenPos.X
+	local dy = viewportPos.Y - screenPos.Y
+	return (dx * dx + dy * dy) <= (tolerancePx * tolerancePx)
 end
 
 local function getRayFromViewportPosition(viewportPos: Vector2): (Vector3?, Vector3?)
@@ -155,7 +188,7 @@ local function getRayFromViewportPosition(viewportPos: Vector2): (Vector3?, Vect
 	return ray.Origin, dir / mag
 end
 
-local function isRayNearLocalCharacter(origin: Vector3, dirUnit: Vector3): boolean
+local function isRayNearLocalCharacter(origin: Vector3, dirUnit: Vector3, nearRadiusStuds: number): boolean
 	local player = Players.LocalPlayer
 	local character = player.Character
 	if not character then
@@ -171,9 +204,13 @@ local function isRayNearLocalCharacter(origin: Vector3, dirUnit: Vector3): boole
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = { character }
 	params.IgnoreWater = true
-	local hit = Workspace:Raycast(origin, dirUnit * 2048, params)
+	local hit = Workspace:Raycast(origin, dirUnit * VIEWPORT_RAY_DISTANCE, params)
 	if hit and hit.Instance and hit.Instance:IsDescendantOf(character) then
 		return true
+	end
+
+	if nearRadiusStuds <= 0 then
+		return false
 	end
 
 	-- Otherwise, allow taps that are "near" the character in 3D.
@@ -184,11 +221,15 @@ local function isRayNearLocalCharacter(origin: Vector3, dirUnit: Vector3): boole
 	end
 	local closest = origin + dirUnit * t
 	local dist = (root.Position - closest).Magnitude
-	local TOUCH_NEAR_RADIUS_STUDS = 10
-	return dist <= TOUCH_NEAR_RADIUS_STUDS
+	return dist <= nearRadiusStuds
 end
 
-local function shouldOpenFromViewportTap(viewportPos: Vector2, allowNearCharacter: boolean): boolean
+-- nearCharacterRadiusStuds:
+--  nil  -> only exact cell click
+--  0    -> cell click OR direct click on the local character (no "near" radius)
+--  >0   -> cell click OR direct click on/near the local character
+-- screenTolerancePx: optional screen-space forgiveness (useful for mouse far zoom)
+local function shouldOpenFromViewportTap(viewportPos: Vector2, nearCharacterRadiusStuds: number?, screenTolerancePx: number?): boolean
 	local currentKey = getCurrentCellKeyUnderPlayer()
 	if not currentKey then
 		return false
@@ -202,10 +243,14 @@ local function shouldOpenFromViewportTap(viewportPos: Vector2, allowNearCharacte
 		return true
 	end
 
-	if allowNearCharacter then
+	if screenTolerancePx ~= nil and isViewportPosNearCurrentCellCenter(viewportPos, screenTolerancePx) then
+		return true
+	end
+
+	if nearCharacterRadiusStuds ~= nil then
 		local rayOrigin, rayDirUnit = getRayFromViewportPosition(viewportPos)
 		if rayOrigin and rayDirUnit then
-			return isRayNearLocalCharacter(rayOrigin, rayDirUnit)
+			return isRayNearLocalCharacter(rayOrigin, rayDirUnit, nearCharacterRadiusStuds)
 		end
 	end
 
@@ -244,8 +289,11 @@ function Shared.OnStart()
 
 		local mousePos = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
-		local viewportPos = Vector2.new(mousePos.X - inset.X, mousePos.Y - inset.Y)
-		if shouldOpenFromViewportTap(viewportPos, false) then
+		local rawViewportPos = Vector2.new(mousePos.X, mousePos.Y)
+		local insetViewportPos = Vector2.new(mousePos.X - inset.X, mousePos.Y - inset.Y)
+
+		if shouldOpenFromViewportTap(insetViewportPos, 0, MOUSE_CELL_SCREEN_TOLERANCE_PX)
+			or shouldOpenFromViewportTap(rawViewportPos, 0, MOUSE_CELL_SCREEN_TOLERANCE_PX) then
 			Gui.Enabled = true
 		end
 	end)
@@ -267,7 +315,8 @@ function Shared.OnStart()
 		local rawViewportPos = Vector2.new(pos.X, pos.Y)
 		local insetViewportPos = Vector2.new(pos.X - inset.X, pos.Y - inset.Y)
 
-		if shouldOpenFromViewportTap(rawViewportPos, true) or shouldOpenFromViewportTap(insetViewportPos, true) then
+		local TOUCH_NEAR_RADIUS_STUDS = 10
+		if shouldOpenFromViewportTap(rawViewportPos, TOUCH_NEAR_RADIUS_STUDS) or shouldOpenFromViewportTap(insetViewportPos, TOUCH_NEAR_RADIUS_STUDS) then
 			Gui.Enabled = true
 		end
 	end

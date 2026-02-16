@@ -12,6 +12,10 @@ local OUTLINE_HEIGHT = 0.12
 local EDGE_WIDTH = 0.22
 local HEIGHT_OFFSET = 0.02
 
+local HINT_PLATE_THICKNESS = 0.05
+local HINT_PLATE_Y_OFFSET = 0.02
+local HINT_TEXT = "Tap here to spawn"
+
 local COLOR = Color3.fromRGB(0, 255, 170)
 local TRANSPARENCY = 0.25
 
@@ -65,7 +69,7 @@ end
 local function createEdgeAdornment(name: string): BoxHandleAdornment
 	local adornment = Instance.new("BoxHandleAdornment")
 	adornment.Name = name
-	adornment.AlwaysOnTop = true
+	adornment.AlwaysOnTop = false
 	adornment.ZIndex = 10
 	adornment.Color3 = COLOR
 	adornment.Transparency = TRANSPARENCY
@@ -73,11 +77,57 @@ local function createEdgeAdornment(name: string): BoxHandleAdornment
 	return adornment
 end
 
+local function createHintPlate(): (BasePart, SurfaceGui, TextLabel)
+	local plate = Instance.new("Part")
+	plate.Name = "GridSquareSpawnHintPlate"
+	plate.Anchored = true
+	plate.CanCollide = false
+	plate.CanTouch = false
+	plate.CanQuery = false
+	plate.CastShadow = false
+	plate.Transparency = 1
+	plate.Material = Enum.Material.SmoothPlastic
+	plate.Size = Vector3.new(SQUARE_SIZE, HINT_PLATE_THICKNESS, SQUARE_SIZE)
+	plate.Locked = true
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "GridSquareSpawnHintGui"
+	gui.Adornee = plate
+	gui.Face = Enum.NormalId.Top
+	gui.AlwaysOnTop = false
+	gui.LightInfluence = 0
+	gui.ResetOnSpawn = false
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 48
+	gui.Enabled = false
+	gui.Parent = plate
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Text"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Text = HINT_TEXT
+	label.TextScaled = true
+	label.TextWrapped = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0.25
+	label.Parent = gui
+
+	plate.Parent = Workspace
+	return plate, gui, label
+end
+
 local player = Players.LocalPlayer
 local edgeNorth = createEdgeAdornment("GridSquareEdgeNorth")
 local edgeSouth = createEdgeAdornment("GridSquareEdgeSouth")
 local edgeWest = createEdgeAdornment("GridSquareEdgeWest")
 local edgeEast = createEdgeAdornment("GridSquareEdgeEast")
+
+local hintPlate, hintGui, hintLabel = (function()
+	local plate, gui, label = createHintPlate()
+	return plate, gui, label
+end)()
 
 edgeNorth.Parent = Workspace
 edgeSouth.Parent = Workspace
@@ -95,6 +145,10 @@ local function setVisible(visible: boolean)
 		edgeSouth.Visible = visible
 		edgeWest.Visible = visible
 		edgeEast.Visible = visible
+	end
+
+	if hintGui.Enabled ~= visible then
+		hintGui.Enabled = visible
 	end
 end
 
@@ -127,6 +181,22 @@ local function update()
 		lastIz = iz
 		lastBaseplate = baseplate
 
+		-- Orient hint for this player: castle is in a baseplate corner.
+		-- CornerId is replicated from the server (see CastleSpawnOnJoin).
+		local cornerId = player:GetAttribute("CornerId")
+		if type(cornerId) == "number" then
+			cornerId = math.floor(cornerId)
+			-- Corners 1/2 are on the -Z side; 3/4 on the +Z side.
+			-- Flip so the bottom edge of the text points toward the player's castle.
+			if cornerId == 1 or cornerId == 2 then
+				hintLabel.Rotation = 180
+			else
+				hintLabel.Rotation = 0
+			end
+		else
+			hintLabel.Rotation = 0
+		end
+
 		local halfX = baseplate.Size.X / 2
 		local halfZ = baseplate.Size.Z / 2
 		local xCenter = -halfX + (ix * SQUARE_SIZE) + (SQUARE_SIZE / 2)
@@ -134,6 +204,7 @@ local function update()
 		local half = SQUARE_SIZE / 2
 		local edgeInset = half - (EDGE_WIDTH / 2)
 		local y = (baseplate.Size.Y / 2) + (OUTLINE_HEIGHT / 2) + HEIGHT_OFFSET
+		local hintY = (baseplate.Size.Y / 2) + (HINT_PLATE_THICKNESS / 2) + HINT_PLATE_Y_OFFSET
 
 		edgeNorth.Adornee = baseplate
 		edgeSouth.Adornee = baseplate
@@ -151,6 +222,9 @@ local function update()
 		edgeEast.Size = Vector3.new(EDGE_WIDTH, OUTLINE_HEIGHT, SQUARE_SIZE)
 		edgeWest.CFrame = CFrame.new(xCenter - edgeInset, y, zCenter)
 		edgeEast.CFrame = CFrame.new(xCenter + edgeInset, y, zCenter)
+
+		hintPlate.Size = Vector3.new(SQUARE_SIZE, HINT_PLATE_THICKNESS, SQUARE_SIZE)
+		hintPlate.CFrame = baseplate.CFrame * CFrame.new(xCenter, hintY, zCenter)
 	end
 
 	setVisible(true)
