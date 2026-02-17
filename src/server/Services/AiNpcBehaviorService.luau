@@ -9,6 +9,7 @@ local Debris = game:GetService("Debris")
 
 local CombatParams = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
 local Animations = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
+local AttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("AttackSounds"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
@@ -19,6 +20,8 @@ local ATTACK_RELEASE_PARAM = "1"
 local CAST_MARKER_NAME = "Cast"
 local CAST_RELEASE_PARAM = "1"
 local DEBUG = false
+
+local ATTACK_SFX_LIFETIME_SECONDS = 5
 
 local ARROW_ORIGIN_NAME = "ArrowOrigin"
 local CAST_ORIGIN_NAME = "CastStart"
@@ -34,6 +37,28 @@ local function dprint(...)
 	if DEBUG then
 		print(...)
 	end
+end
+
+local function playAttackSfx(parentPart: BasePart?, unitClass: string?)
+	if not parentPart or not parentPart.Parent then
+		return
+	end
+
+	local soundId = (AttackSounds :: any).ResolveByUnitClass(unitClass)
+	if type(soundId) ~= "string" or soundId == "" then
+		return
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "AttackSfx"
+	sound.SoundId = soundId
+	sound.Volume = 0.2666667
+	sound.RollOffMaxDistance = 80
+	sound.Parent = parentPart
+	pcall(function()
+		sound:Play()
+	end)
+	Debris:AddItem(sound, ATTACK_SFX_LIFETIME_SECONDS)
 end
 
 local function getHumanoid(model: Model): Humanoid?
@@ -549,6 +574,7 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 				faceTarget(root :: BasePart, castleCenterWorld, aiNpc)
 
 				-- Apply damage strictly at the animation marker moment.
+				playAttackSfx(root, unitClass)
 				CastleHealthService.ApplyDamage(targetCastle, (params.Damage or 1), aiNpc)
 
 				-- Spawn ranged/magic visuals toward the castle, like NPC-vs-NPC.

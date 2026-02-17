@@ -20,6 +20,7 @@ local RunService = game:GetService("RunService")
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local AnimationsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 local CombatParamsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CombatParams"))
+local AttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("AttackSounds"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("ShopConfig"))
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
@@ -47,6 +48,43 @@ local LAST_HIT_TEAM_ID_ATTRIBUTE = "LastHitTeamId"
 local LAST_HIT_OWNER_USER_ID_ATTRIBUTE = "LastHitOwnerUserId"
 local LAST_HIT_AT_ATTRIBUTE = "LastHitAt"
 local COIN_REWARD_GIVEN_ATTRIBUTE = "KillCoinRewardGiven"
+
+local ATTACK_SFX_LIFETIME_SECONDS = 5
+
+local function playAttackSfx(npc: Model)
+	local rootInst = npc:FindFirstChild("HumanoidRootPart")
+	local root = if rootInst and rootInst:IsA("BasePart") then rootInst :: BasePart else nil
+	if not root then
+		local primary = npc.PrimaryPart
+		if primary and primary:IsA("BasePart") then
+			root = primary
+		else
+			local anyPart = npc:FindFirstChildWhichIsA("BasePart", true)
+			if anyPart and anyPart:IsA("BasePart") then
+				root = anyPart
+			end
+		end
+	end
+	if not root or not root.Parent then
+		return
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "AttackSfx"
+	local unitClass = npc:GetAttribute("UnitClass")
+	local soundId = (AttackSounds :: any).ResolveByUnitClass(unitClass)
+	if type(soundId) ~= "string" or soundId == "" then
+		return
+	end
+	sound.SoundId = soundId
+	sound.Volume = 0.2666667
+	sound.RollOffMaxDistance = 80
+	sound.Parent = root
+	pcall(function()
+		sound:Play()
+	end)
+	Debris:AddItem(sound, ATTACK_SFX_LIFETIME_SECONDS)
+end
 
 local function normalizePositiveInt(value: any): number
 	if type(value) ~= "number" then
@@ -1041,6 +1079,7 @@ local function onAttackMarker(attacker: Model, param: string)
 		return
 	end
 
+	playAttackSfx(attacker)
 	dealDamageNow(attacker, target)
 	if isMageUnit(attacker) then
 		castMagicNow(attacker, target)
@@ -1059,6 +1098,7 @@ local function onCastMarker(attacker: Model, param: string)
 		return
 	end
 
+	playAttackSfx(attacker)
 	dealDamageNow(attacker, target)
 	castMagicNow(attacker, target)
 end

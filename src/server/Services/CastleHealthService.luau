@@ -2,6 +2,7 @@
 -- Manages castle (and future building) health via Model attributes.
 
 local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
 
 local HEALTH_ATTR = "Health"
 local MAX_HEALTH_ATTR = "MaxHealth"
@@ -14,7 +15,46 @@ local GUI_NAME = "CastleHealthBillboard"
 
 local DEFAULT_MAX_HEALTH = 1000
 
+local CASTLE_DESTROYED_SFX_ID = "rbxassetid://83808819886243"
+local CASTLE_DESTROYED_SFX_VOLUME = 0.6
+local CASTLE_DESTROYED_SFX_ROLLOFF_MAX_DISTANCE = 200
+local CASTLE_DESTROYED_SFX_LIFETIME_SECONDS = 10
+
 local castleDestroyedBindable = Instance.new("BindableEvent")
+
+local function playCastleDestroyedSfx(castle: Model)
+	if not castle or not castle.Parent then
+		return
+	end
+
+	local pivot: CFrame = CFrame.new()
+	pcall(function()
+		pivot = castle:GetPivot()
+	end)
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "CastleDestroyedSfx"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(1, 1, 1)
+	anchor.CFrame = pivot
+	anchor.Parent = Workspace
+
+	local sound = Instance.new("Sound")
+	sound.Name = "Destroyed"
+	sound.SoundId = CASTLE_DESTROYED_SFX_ID
+	sound.Volume = CASTLE_DESTROYED_SFX_VOLUME
+	sound.RollOffMaxDistance = CASTLE_DESTROYED_SFX_ROLLOFF_MAX_DISTANCE
+	sound.Parent = anchor
+
+	pcall(function()
+		sound:Play()
+	end)
+	Debris:AddItem(anchor, CASTLE_DESTROYED_SFX_LIFETIME_SECONDS)
+end
 
 local function getAnyBasePart(model: Model): BasePart?
 	local primary = model.PrimaryPart
@@ -238,6 +278,7 @@ function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boo
 
 	if nextHealth <= 0 then
 		castle:SetAttribute(DESTROYED_ATTR, true)
+		playCastleDestroyedSfx(castle)
 		local ownerUserId = Shared.GetOwnerUserId(castle)
 		local teamId = Shared.GetCastleTeamId(castle)
 		-- Fire after marking destroyed but before model destruction.
