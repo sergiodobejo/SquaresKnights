@@ -226,6 +226,11 @@ function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boo
 		return false
 	end
 
+	-- Replicated signal for clients/UI.
+	pcall(function()
+		castle:SetAttribute("LastDamagedServerTime", workspace:GetServerTimeNow())
+	end)
+
 	local maxHealth = Shared.GetMaxHealth(castle)
 	local cur = Shared.GetHealth(castle)
 	local nextHealth = clampHealth(cur - amount, maxHealth)
