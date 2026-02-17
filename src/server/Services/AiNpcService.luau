@@ -95,6 +95,20 @@ local function _getBaseplateCenter(): Vector3?
 end
 
 local AI_SPAWN_SPREAD_STUDS = 20
+local AI_SPAWN_HEIGHT_ABOVE_GROUND = 6.2
+
+local function getGroundPositionAt(worldXZ: Vector3, ignoreInstances: { Instance }): Vector3
+	local rayOrigin = worldXZ + Vector3.new(0, 120, 0)
+	local rayDirection = Vector3.new(0, -400, 0)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignoreInstances
+	local hit = workspace:Raycast(rayOrigin, rayDirection, params)
+	if hit then
+		return hit.Position
+	end
+	return worldXZ
+end
 
 -- Create a spawned AI NPC clone with proper setup
 local function spawnAiNpc(npcTemplate: Model, baseplate: BasePart): Model?
@@ -103,7 +117,18 @@ local function spawnAiNpc(npcTemplate: Model, baseplate: BasePart): Model?
 	local radius = math.sqrt(math.random()) * AI_SPAWN_SPREAD_STUDS
 	local offsetLocal = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
 	local offsetWorld = baseplate.CFrame:VectorToWorldSpace(offsetLocal)
-	local spawnPos = baseplate.Position + offsetWorld + Vector3.new(0, 5, 0)
+	local spawnXZ = baseplate.Position + offsetWorld
+	local ignore: { Instance } = {}
+	local maybeNpcFolder = workspace:FindFirstChild("NPC")
+	if maybeNpcFolder then
+		table.insert(ignore, maybeNpcFolder)
+	end
+	local maybeLiveNpcFolder = workspace:FindFirstChild("LiveNPC")
+	if maybeLiveNpcFolder then
+		table.insert(ignore, maybeLiveNpcFolder)
+	end
+	local groundPos = getGroundPositionAt(spawnXZ, ignore)
+	local spawnPos = groundPos + Vector3.new(0, AI_SPAWN_HEIGHT_ABOVE_GROUND, 0)
 	
 	local clone = npcTemplate:Clone()
 	
