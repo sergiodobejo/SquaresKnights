@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeamColorService = require(script.Parent:WaitForChild("Services"):WaitForChild("TeamColorService"))
 local GridCellOccupancyService = require(script.Parent:WaitForChild("Services"):WaitForChild("GridCellOccupancyService"))
 local CastleHealthService = require(script.Parent:WaitForChild("Services"):WaitForChild("CastleHealthService"))
+local OpenArenaCornerReservationService = require(script.Parent:WaitForChild("Services"):WaitForChild("OpenArenaCornerReservationService"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
@@ -307,9 +308,6 @@ local function getOrAssignCornerIdForPlayer(player: Player): number
 end
 
 local function ensureCastleForPlayer(player: Player)
-	-- Ensure team color exists (idempotent).
-	TeamColorService.AssignPlayer(player)
-
 	unblockCastleCellsForUserId(player.UserId)
 
 	local baseplate = getBaseplate()
@@ -325,6 +323,27 @@ local function ensureCastleForPlayer(player: Player)
 	end
 
 	local cornerId = getOrAssignCornerIdForPlayer(player)
+
+	-- Open Arena: initialize/consume corner reservations.
+	-- For non-Open-Arena servers, this service is inactive and these calls are no-ops.
+	if OpenArenaCornerReservationService.IsActive() then
+		local reserved = OpenArenaCornerReservationService.GetReservedColorForCorner(cornerId)
+		if type(reserved) == "string" and reserved ~= "" then
+			TeamColorService.AssignPlayerSpecific(player, reserved)
+		else
+			TeamColorService.AssignPlayer(player)
+		end
+		OpenArenaCornerReservationService.ClearReservationForCorner(cornerId)
+	else
+		-- Ensure team color exists (idempotent).
+		TeamColorService.AssignPlayer(player)
+		-- If this is the first Open Arena player, activate and reserve the other corners.
+		OpenArenaCornerReservationService.MaybeActivateForFirstPlayer(player, baseplate, cornerId)
+		if OpenArenaCornerReservationService.IsActive() then
+			-- After activation, keep reservations in sync with currently-occupied corners.
+			OpenArenaCornerReservationService.ApplyReservations(baseplate, occupiedCornerIds)
+		end
+	end
 	local clone = template:Clone()
 	clone.Name = string.format("%s_%d", CASTLE_MODEL_NAME, player.UserId)
 	applyBuildingTextureForPlayer(clone, player)
@@ -359,6 +378,10 @@ local function ensureCastleForPlayer(player: Player)
 	end)
 
 	blockCastleCellsForPlayer(player, baseplate, cornerId)
+
+	if OpenArenaCornerReservationService.IsActive() then
+		OpenArenaCornerReservationService.ApplyReservations(baseplate, occupiedCornerIds)
+	end
 
 	clone.AncestryChanged:Connect(function(_, parent)
 		if parent ~= nil then
@@ -420,6 +443,13 @@ local function onPlayerRemoving(player: Player)
 	cornerIdByUserId[userId] = nil
 	if cornerId then
 		occupiedCornerIds[cornerId] = nil
+	end
+
+	if OpenArenaCornerReservationService.IsActive() then
+		local baseplate = getBaseplate()
+		if baseplate then
+			OpenArenaCornerReservationService.ApplyReservations(baseplate, occupiedCornerIds)
+		end
 	end
 
 	local castle = castlesByUserId[userId]

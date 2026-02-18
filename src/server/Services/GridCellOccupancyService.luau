@@ -14,6 +14,7 @@ local NpcSpawnService = require(ServerScriptService.Services:WaitForChild("NpcSp
 
 local OCCUPANCY_FOLDER_NAME = "CellOccupancy"
 local OVERLAY_FOLDER_NAME = "CellOverlays"
+local RESERVED_OVERLAY_FOLDER_NAME = "ReservedCellOverlays"
 local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 -- Duration for temporary capture highlight + block.
@@ -68,6 +69,12 @@ end
 
 local occupancyFolder = ensureReplicatedFolder()
 local overlayFolder = ensureOverlayFolder()
+
+local function ensureReservedOverlayFolder(): Folder
+	return getOrCreateFolder(workspace, RESERVED_OVERLAY_FOLDER_NAME)
+end
+
+local reservedOverlayFolder = ensureReservedOverlayFolder()
 
 local function ensureCapturedBlocksFolder(): Folder
 	local existing = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
@@ -682,6 +689,54 @@ local function destroyOverlayForKey(key: string)
 	if existing and existing:IsA("BasePart") then
 		existing:Destroy()
 	end
+end
+
+local function destroyReservedOverlayForKey(key: string)
+	local existing = reservedOverlayFolder:FindFirstChild(key)
+	if existing and existing:IsA("BasePart") then
+		existing:Destroy()
+	end
+end
+
+-- Creates a standard NPC-like overlay for keys that are blocked/reserved for future use.
+-- Stored separately from NPC overlays to avoid conflicts.
+function Shared.SetReservedOverlayForKey(baseplate: BasePart?, key: string, teamColorName: any)
+	if not baseplate then
+		return
+	end
+	if type(teamColorName) ~= "string" or teamColorName == "" then
+		return
+	end
+	local ix, iz = GridCells.ParseCellKey(key)
+	if ix == nil or iz == nil then
+		return
+	end
+
+	local baseTeamColor3 = TeamColors.GetColor3(teamColorName)
+	local overlayColor3 = TeamColors.GetCheckerboardVariantColor3(baseTeamColor3, ix, iz)
+
+	destroyReservedOverlayForKey(key)
+	local part = Instance.new("Part")
+	part.Name = key
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Material = Enum.Material.Concrete
+	part.Reflectance = 0
+	part.Color = overlayColor3
+	part.Transparency = OVERLAY_TRANSPARENCY
+	part.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, OVERLAY_HEIGHT, GridCells.SQUARE_SIZE_STUDS)
+	part.CFrame = GridCells.GetCellCFrameOnTop(baseplate, ix, iz, (OVERLAY_HEIGHT / 2) + OVERLAY_Y_GAP)
+	part.Parent = reservedOverlayFolder
+
+	part:SetAttribute("TeamColorName", teamColorName)
+	part:SetAttribute("TeamColor3", baseTeamColor3)
+	part:SetAttribute("OverlayColor3", overlayColor3)
+end
+
+function Shared.ClearReservedOverlayForKey(key: string)
+	destroyReservedOverlayForKey(key)
 end
 
 function Shared.FreeCellKey(key: string)

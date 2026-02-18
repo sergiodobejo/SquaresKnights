@@ -63,8 +63,25 @@ for _, name in ipairs(ALL_COLORS) do
 	end
 end
 local assignedByUserId: { [number]: string } = {}
+local reservedColorNames: { [string]: boolean } = {}
 
 local rng = Random.new()
+
+local function removeFromAvailable(colorName: string)
+	local idx = table.find(availableColors, colorName)
+	if idx ~= nil then
+		table.remove(availableColors, idx)
+	end
+end
+
+local function stampPlayerAttributes(player: Player, colorName: string)
+	local teamId = COLOR_TO_TEAM_ID[colorName]
+
+	player:SetAttribute(Shared.Attributes.TeamColor, colorName)
+	if teamId then
+		player:SetAttribute(Affiliation.Attributes.TeamId, teamId)
+	end
+end
 
 function Shared.GetAllColors(): { string }
 	return table.clone(ALL_COLORS)
@@ -91,6 +108,48 @@ function Shared.GetColorForPlayer(player: Player): string?
 		return attr
 	end
 	return assignedByUserId[player.UserId]
+end
+
+-- Marks a color as reserved for system purposes (e.g. Open Arena corner pre-assignment).
+-- Reserved colors are removed from the random pool and are not returned to the pool on player leave.
+function Shared.ReserveColorName(colorName: any): boolean
+	if not isPlayerAssignableColor(colorName) then
+		return false
+	end
+	local name = (colorName :: string):lower()
+	reservedColorNames[name] = true
+	removeFromAvailable(name)
+	return true
+end
+
+function Shared.IsColorNameReserved(colorName: any): boolean
+	if type(colorName) ~= "string" then
+		return false
+	end
+	return reservedColorNames[colorName:lower()] == true
+end
+
+-- Takes and returns a random available player-assignable color name.
+-- If none are available, falls back to a random valid color.
+function Shared.TakeRandomAvailablePlayerColorName(): string
+	local chosen: string
+	if #availableColors > 0 then
+		local idx = rng:NextInteger(1, #availableColors)
+		chosen = table.remove(availableColors, idx) :: string
+	else
+		local fallback: { string } = {}
+		for _, name in ipairs(ALL_COLORS) do
+			if isPlayerAssignableColor(name) then
+				table.insert(fallback, name)
+			end
+		end
+		if #fallback > 0 then
+			chosen = fallback[rng:NextInteger(1, #fallback)]
+		else
+			chosen = "red"
+		end
+	end
+	return chosen
 end
 
 local function assignColorInternal(player: Player): string
@@ -122,14 +181,41 @@ local function assignColorInternal(player: Player): string
 	return chosen
 end
 
+-- Assigns a specific color to the player (idempotent).
+-- This overrides any previous assignment for that userId.
+function Shared.AssignPlayerSpecific(player: Player, colorName: any): string
+	local userId = player.UserId
+	if type(colorName) ~= "string" or colorName == "" then
+		return Shared.AssignPlayer(player)
+	end
+	local desired = colorName:lower()
+	if not isPlayerAssignableColor(desired) then
+		return Shared.AssignPlayer(player)
+	end
+
+	local existing = assignedByUserId[userId]
+	if existing == desired then
+		stampPlayerAttributes(player, desired)
+		return desired
+	end
+
+	-- Release previous choice back to pool unless it's reserved.
+	if existing then
+		assignedByUserId[userId] = nil
+		if isPlayerAssignableColor(existing) and not reservedColorNames[existing:lower()] then
+			table.insert(availableColors, existing)
+		end
+	end
+
+	assignedByUserId[userId] = desired
+	removeFromAvailable(desired)
+	stampPlayerAttributes(player, desired)
+	return desired
+end
+
 function Shared.AssignPlayer(player: Player): string
 	local colorName = assignColorInternal(player)
-	local teamId = COLOR_TO_TEAM_ID[colorName]
-
-	player:SetAttribute(Shared.Attributes.TeamColor, colorName)
-	if teamId then
-		player:SetAttribute(Affiliation.Attributes.TeamId, teamId)
-	end
+	stampPlayerAttributes(player, colorName)
 
 	return colorName
 end
@@ -142,7 +228,7 @@ function Shared.ReleasePlayer(player: Player)
 	end
 
 	assignedByUserId[userId] = nil
-	if isPlayerAssignableColor(colorName) then
+	if isPlayerAssignableColor(colorName) and not reservedColorNames[colorName:lower()] then
 		table.insert(availableColors, colorName)
 	end
 
