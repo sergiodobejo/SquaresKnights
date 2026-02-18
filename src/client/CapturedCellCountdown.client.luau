@@ -3,11 +3,39 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
+
+-- Camera focus on newly-captured regions (owned by this player).
+local CAMERA_OUT_SECONDS = 0.45
+local CAMERA_HOLD_SECONDS = 0.75
+local CAMERA_BACK_SECONDS = 0.45
+local CAMERA_COOLDOWN_SECONDS = 2.5
+local CAMERA_MARGIN_CELLS = 1
+local CAMERA_MIN_DISTANCE = 34
+local CAMERA_HEIGHT_RATIO = 0.7
+local CAMERA_MAX_HORIZONTAL_DISTANCE = 450
+
+-- VFX shown while the camera frames a captured region.
+local VFX_START_HEIGHT_MIN = 10
+local VFX_START_HEIGHT_MAX = 22
+local VFX_START_DELAY_MAX = 0.5
+local VFX_DROP_DURATION_MIN = 0.45
+local VFX_DROP_DURATION_MAX = 0.85
+local VFX_FADE_IN_SECONDS = 0.12
+local VFX_FADE_OUT_SECONDS = 0.35
+local VFX_HOLD_AFTER_LAND_MIN = 0.25
+local VFX_HOLD_AFTER_LAND_MAX = 0.7
+local VFX_TRANSPARENCY_VISIBLE = 0.25
+local VFX_THICKNESS = 0.12
+local VFX_Y_OFFSET_ABOVE_SURFACE = 0.44
+local VFX_LIFETIME_MAX = 4.5
+local vfxRng = Random.new()
 
 local TEXT_SIZE = 18
 local MAX_DISTANCE = 120
@@ -25,19 +53,11 @@ local CAPTURED_DIAGONAL_ROT_B = -45
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local baseplate: BasePart? = nil
-local function getBaseplate(): BasePart?
-	if baseplate and baseplate:IsDescendantOf(Workspace) then
-		return baseplate
-	end
-	local inst = Workspace:FindFirstChild("Baseplate")
-	if inst and inst:IsA("BasePart") then
-		baseplate = inst
-		return inst
-	end
-	baseplate = nil
-	return nil
-end
+local getBaseplate: () -> BasePart?
+
+local refreshAll: () -> ()
+local getHintRotationForLocalPlayer: () -> number
+local applyCapturedTextStyle: (label: TextLabel, marker: Instance) -> ()
 
 type Entry = {
 	key: string,
@@ -54,12 +74,402 @@ type Entry = {
 
 local entriesByKey: { [string]: Entry } = {}
 
+-- When a camera cinematic plays, we temporarily hide the normal captured overlay/text
+-- for those cells until the falling VFX square lands.
+local delayedRevealByKey: { [string]: boolean } = {}
+local landedRevealByKey: { [string]: boolean } = {}
+
+local pendingCameraKeys: { [string]: boolean } = {}
+local pendingCameraFlushScheduled = false
+local cinematicRunning = false
+local lastCinematicAt = -1e9
+
+local function getCurrentCamera(): Camera?
+	local cam = Workspace.CurrentCamera
+	if cam and cam:IsA("Camera") then
+		return cam
+	end
+	return nil
+end
+
+local function tryGetCaptureOwnerUserId(marker: Instance): number?
+	local v = marker:GetAttribute("CaptureOwnerUserId")
+	if type(v) == "number" then
+		return math.floor(v)
+	end
+	return nil
+end
+
+local function computeCaptureBoundsLocalXZ(bp: BasePart, keys: { string }): (number?, number?, number?, number?)
+	local minX: number? = nil
+	local maxX: number? = nil
+	local minZ: number? = nil
+	local maxZ: number? = nil
+
+	local half = GridCells.SQUARE_SIZE_STUDS / 2
+	local margin = (GridCells.SQUARE_SIZE_STUDS * CAMERA_MARGIN_CELLS)
+
+	for _, key in ipairs(keys) do
+		local ix, iz = GridCells.ParseCellKey(key)
+		if ix ~= nil and iz ~= nil then
+			local xCenter, zCenter = GridCells.GetCellCenterLocalXZ(bp, ix, iz)
+			local aX = xCenter - half - margin
+			local bX = xCenter + half + margin
+			local aZ = zCenter - half - margin
+			local bZ = zCenter + half + margin
+
+			minX = if minX == nil then aX else math.min(minX, aX)
+			maxX = if maxX == nil then bX else math.max(maxX, bX)
+			minZ = if minZ == nil then aZ else math.min(minZ, aZ)
+			maxZ = if maxZ == nil then bZ else math.max(maxZ, bZ)
+		end
+	end
+
+	return minX, maxX, minZ, maxZ
+end
+
+local function getHorizontalBackVectorFromCamera(cam: Camera): Vector3
+	local look = cam.CFrame.LookVector
+	local horizontal = Vector3.new(look.X, 0, look.Z)
+	if horizontal.Magnitude < 1e-3 then
+		return Vector3.new(0, 0, 1)
+	end
+	return -horizontal.Unit
+end
+
+local function playCaptureCameraCinematic(keys: { string })
+	if cinematicRunning then
+		return
+	end
+	local now = os.clock()
+	if (now - lastCinematicAt) < CAMERA_COOLDOWN_SECONDS then
+		return
+	end
+
+	local bp = getBaseplate()
+	if not bp then
+		return
+	end
+
+	local cam = getCurrentCamera()
+	if not cam then
+		return
+	end
+
+	local minX, maxX, minZ, maxZ = computeCaptureBoundsLocalXZ(bp, keys)
+	if minX == nil or maxX == nil or minZ == nil or maxZ == nil then
+		return
+	end
+
+	local centerX = (minX + maxX) / 2
+	local centerZ = (minZ + maxZ) / 2
+	local targetWorld = (bp.CFrame * CFrame.new(centerX, (bp.Size.Y / 2) + 1.0, centerZ)).Position
+
+	local sizeX = math.max(0, maxX - minX)
+	local sizeZ = math.max(0, maxZ - minZ)
+	local size = math.max(sizeX, sizeZ)
+
+	local horizontalBack = getHorizontalBackVectorFromCamera(cam)
+	local distance = math.max(CAMERA_MIN_DISTANCE, (size * 0.95) + 12)
+	if distance > CAMERA_MAX_HORIZONTAL_DISTANCE then
+		distance = CAMERA_MAX_HORIZONTAL_DISTANCE
+	end
+	local height = (distance * CAMERA_HEIGHT_RATIO) + 10
+	local targetPos = targetWorld + (horizontalBack * distance) + Vector3.new(0, height, 0)
+	local targetCFrame = CFrame.lookAt(targetPos, targetWorld)
+
+	local originalType = cam.CameraType
+	local originalCFrame = cam.CFrame
+	local originalFov = cam.FieldOfView
+
+	local function spawnCaptureVfx()
+		local capturedFolder = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+		if not capturedFolder or not capturedFolder:IsA("Folder") then
+			return
+		end
+			local overlayFolder = Workspace:FindFirstChild("CapturedCellOverlays")
+
+			local function setLocalOverlayHidden(cellKey: string, hidden: boolean)
+				if not overlayFolder or not overlayFolder:IsA("Folder") then
+					return
+				end
+				for _, eventFolder in ipairs((overlayFolder :: Folder):GetChildren()) do
+					if not eventFolder:IsA("Folder") then
+						continue
+					end
+					local p = eventFolder:FindFirstChild(cellKey)
+					if p and p:IsA("BasePart") then
+						(p :: BasePart).LocalTransparencyModifier = if hidden then 1 else 0
+						return
+					end
+				end
+			end
+
+			local function createVfxTextOnPart(part: BasePart, marker: Instance, ix: number, iz: number)
+				local diagonalRotation = if ((ix + iz) % 2) == 0 then CAPTURED_DIAGONAL_ROT_A else CAPTURED_DIAGONAL_ROT_B
+				local surfaceGui = Instance.new("SurfaceGui")
+				surfaceGui.Name = "CapturedVfxSurfaceGui"
+				surfaceGui.Adornee = part
+				surfaceGui.Face = Enum.NormalId.Top
+				surfaceGui.AlwaysOnTop = false
+				surfaceGui.LightInfluence = 0
+				surfaceGui.ResetOnSpawn = false
+				surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+				surfaceGui.PixelsPerStud = CAPTURED_PIXELS_PER_STUD
+				surfaceGui.Enabled = true
+				surfaceGui.Parent = part
+
+				local surfaceLabel = Instance.new("TextLabel")
+				surfaceLabel.Name = "Text"
+				surfaceLabel.BackgroundTransparency = 1
+				surfaceLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+				surfaceLabel.Position = UDim2.fromScale(0.5, 0.5)
+				surfaceLabel.Size = UDim2.fromScale(1.3, 1.3)
+				surfaceLabel.Text = CAPTURED_TEXT
+				surfaceLabel.TextScaled = true
+				surfaceLabel.TextWrapped = true
+				surfaceLabel.Font = Enum.Font.LuckiestGuy
+				-- Colors/stroke are applied from marker attributes.
+				surfaceLabel.TextColor3 = Color3.new(1, 1, 1)
+				surfaceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+				surfaceLabel.TextStrokeTransparency = 0
+				surfaceLabel.Rotation = getHintRotationForLocalPlayer() + diagonalRotation
+				surfaceLabel.Parent = surfaceGui
+
+				applyCapturedTextStyle(surfaceLabel, marker)
+			end
+
+		for _, key in ipairs(keys) do
+			local ix, iz = GridCells.ParseCellKey(key)
+			if ix == nil or iz == nil then
+				continue
+			end
+			local marker = capturedFolder:FindFirstChild(key)
+			if not marker then
+				continue
+			end
+			local ownerUserId = tryGetCaptureOwnerUserId(marker)
+			if ownerUserId ~= player.UserId then
+				continue
+			end
+
+			-- Hide the normal overlay/text until the falling square lands.
+			delayedRevealByKey[key] = true
+			landedRevealByKey[key] = false
+			setLocalOverlayHidden(key, true)
+			local existingEntry = entriesByKey[key]
+			if existingEntry then
+				existingEntry.gui.Enabled = false
+				existingEntry.surfaceGui.Enabled = false
+			end
+			local color = marker:GetAttribute("CaptureColor")
+			local color3: Color3 = if typeof(color) == "Color3" then (color :: Color3) else Color3.new(1, 1, 1)
+
+			local xCenter, zCenter = GridCells.GetCellCenterLocalXZ(bp, ix, iz)
+			local endYLocal = (bp.Size.Y / 2) + (VFX_THICKNESS / 2) + VFX_Y_OFFSET_ABOVE_SURFACE
+			local startHeight = vfxRng:NextNumber(VFX_START_HEIGHT_MIN, VFX_START_HEIGHT_MAX)
+			local startYLocal = endYLocal + startHeight
+
+			local part = Instance.new("Part")
+			part.Name = "CaptureVfxSquare_" .. key
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.CastShadow = false
+			part.Material = Enum.Material.SmoothPlastic
+			part.Color = color3
+			part.Transparency = 1
+			part.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, VFX_THICKNESS, GridCells.SQUARE_SIZE_STUDS)
+			part.CFrame = bp.CFrame * CFrame.new(xCenter, startYLocal, zCenter)
+			part.Parent = Workspace
+			Debris:AddItem(part, VFX_LIFETIME_MAX)
+			createVfxTextOnPart(part, marker, ix :: number, iz :: number)
+
+			local startDelay = vfxRng:NextNumber(0, VFX_START_DELAY_MAX)
+			local dropDuration = vfxRng:NextNumber(VFX_DROP_DURATION_MIN, VFX_DROP_DURATION_MAX)
+			local holdAfter = vfxRng:NextNumber(VFX_HOLD_AFTER_LAND_MIN, VFX_HOLD_AFTER_LAND_MAX)
+
+			task.delay(startDelay, function()
+				if part.Parent == nil then
+					return
+				end
+				-- Fade in quickly as it starts falling.
+				TweenService:Create(
+					part,
+					TweenInfo.new(VFX_FADE_IN_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ Transparency = VFX_TRANSPARENCY_VISIBLE }
+				):Play()
+
+				local endCFrame = bp.CFrame * CFrame.new(xCenter, endYLocal, zCenter)
+				local dropTween = TweenService:Create(
+					part,
+					TweenInfo.new(dropDuration, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out),
+					{ CFrame = endCFrame }
+				)
+				dropTween:Play()
+				dropTween.Completed:Wait()
+
+					-- Landed: reveal the normal overlay/text for this cell.
+					landedRevealByKey[key] = true
+					delayedRevealByKey[key] = nil
+					setLocalOverlayHidden(key, false)
+					refreshAll()
+
+				if part.Parent == nil then
+					return
+				end
+				task.wait(holdAfter)
+				if part.Parent == nil then
+					return
+				end
+				local fadeOut = TweenService:Create(
+					part,
+					TweenInfo.new(VFX_FADE_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ Transparency = 1 }
+				)
+				fadeOut:Play()
+				fadeOut.Completed:Wait()
+				pcall(function()
+					part:Destroy()
+				end)
+			end)
+
+			-- Failsafe: never keep the cell hidden forever.
+			task.delay(1.8, function()
+				if landedRevealByKey[key] then
+					return
+				end
+				if marker.Parent == nil then
+					return
+				end
+				landedRevealByKey[key] = true
+				delayedRevealByKey[key] = nil
+				setLocalOverlayHidden(key, false)
+				refreshAll()
+			end)
+		end
+	end
+
+	-- Run cinematic.
+	cinematicRunning = true
+	lastCinematicAt = now
+
+	local ok, err = pcall(function()
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.FieldOfView = originalFov
+
+		local outTween = TweenService:Create(
+			cam,
+			TweenInfo.new(CAMERA_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = targetCFrame }
+		)
+		outTween:Play()
+		outTween.Completed:Wait()
+
+		-- Show VFX while the region is framed.
+		spawnCaptureVfx()
+
+		task.wait(CAMERA_HOLD_SECONDS)
+
+		local backTween = TweenService:Create(
+			cam,
+			TweenInfo.new(CAMERA_BACK_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+			{ CFrame = originalCFrame }
+		)
+		backTween:Play()
+		backTween.Completed:Wait()
+
+		cam.CameraType = originalType
+		cam.CFrame = originalCFrame
+		cam.FieldOfView = originalFov
+	end)
+
+	if not ok then
+		warn("[CapturedCellCountdown] Camera cinematic failed:", err)
+		pcall(function()
+			cam.CameraType = originalType
+			cam.CFrame = originalCFrame
+			cam.FieldOfView = originalFov
+		end)
+	end
+
+	cinematicRunning = false
+end
+
+local function flushPendingCameraKeys()
+	if pendingCameraFlushScheduled then
+		return
+	end
+	pendingCameraFlushScheduled = true
+
+	-- Aggregate keys for a single capture event (markers are added one-by-one).
+	task.delay(0.15, function()
+		pendingCameraFlushScheduled = false
+		local keys: { string } = {}
+		for key in pairs(pendingCameraKeys) do
+			pendingCameraKeys[key] = nil
+			table.insert(keys, key)
+		end
+		if #keys > 0 then
+			playCaptureCameraCinematic(keys)
+		end
+	end)
+end
+
+local function enqueueCameraForMarker(marker: Instance)
+	local key = marker.Name
+	local ownerUserId = tryGetCaptureOwnerUserId(marker)
+	if ownerUserId == player.UserId then
+		pendingCameraKeys[key] = true
+		flushPendingCameraKeys()
+		return
+	end
+
+	-- Attributes can replicate after the child instance; wait briefly.
+	local conn: RBXScriptConnection? = nil
+	conn = marker:GetAttributeChangedSignal("CaptureOwnerUserId"):Connect(function()
+		local v = tryGetCaptureOwnerUserId(marker)
+		if v == player.UserId then
+			pendingCameraKeys[key] = true
+			flushPendingCameraKeys()
+			if conn then
+				conn:Disconnect()
+				conn = nil
+			end
+		end
+	end)
+	-- Safety disconnect.
+	task.delay(2, function()
+		if conn then
+			conn:Disconnect()
+			conn = nil
+		end
+	end)
+end
+
+local baseplate: BasePart? = nil
+getBaseplate = function(): BasePart?
+	if baseplate and baseplate:IsDescendantOf(Workspace) then
+		return baseplate
+	end
+	local inst = Workspace:FindFirstChild("Baseplate")
+	if inst and inst:IsA("BasePart") then
+		baseplate = inst
+		return inst
+	end
+	baseplate = nil
+	return nil
+end
+
 local function destroyEntry(key: string)
 	local entry = entriesByKey[key]
 	if not entry then
 		return
 	end
 	entriesByKey[key] = nil
+	delayedRevealByKey[key] = nil
+	landedRevealByKey[key] = nil
 	pcall(function()
 		entry.gui:Destroy()
 	end)
@@ -71,7 +481,7 @@ local function destroyEntry(key: string)
 	end)
 end
 
-local function getHintRotationForLocalPlayer(): number
+getHintRotationForLocalPlayer = function(): number
 	local cornerId = player:GetAttribute("CornerId")
 	if type(cornerId) ~= "number" then
 		return 0
@@ -87,7 +497,7 @@ local function computeLuminance(c: Color3): number
 	return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B)
 end
 
-local function applyCapturedTextStyle(label: TextLabel, marker: Instance)
+applyCapturedTextStyle = function(label: TextLabel, marker: Instance)
 	local captureColor = marker:GetAttribute("CaptureColor")
 	if typeof(captureColor) == "Color3" then
 		local lum = computeLuminance(captureColor)
@@ -234,7 +644,7 @@ local function createEntryForMarker(marker: Instance)
 	}
 end
 
-local function refreshAll()
+refreshAll = function()
 	for key, entry in pairs(entriesByKey) do
 		if entry.marker.Parent == nil then
 			destroyEntry(key)
@@ -253,6 +663,11 @@ local function refreshAll()
 			entry.surfaceGui.Enabled = false
 			continue
 		end
+		if delayedRevealByKey[key] and not landedRevealByKey[key] then
+			entry.gui.Enabled = false
+			entry.surfaceGui.Enabled = false
+			continue
+		end
 		entry.gui.Enabled = true
 		entry.surfaceGui.Enabled = true
 		entry.surfaceLabel.Rotation = getHintRotationForLocalPlayer() + entry.diagonalRotation
@@ -267,6 +682,7 @@ end
 local function hookFolder(folder: Folder)
 	folder.ChildAdded:Connect(function(child)
 		createEntryForMarker(child)
+		enqueueCameraForMarker(child)
 		refreshAll()
 	end)
 	folder.ChildRemoved:Connect(function(child)
