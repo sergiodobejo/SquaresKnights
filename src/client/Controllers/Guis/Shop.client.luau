@@ -192,6 +192,7 @@ end
 local VIEWPORT_RAY_DISTANCE = 50000
 
 local MOUSE_CELL_SCREEN_TOLERANCE_PX = 32
+local TOUCH_CELL_SCREEN_TOLERANCE_PX = 48
 
 local function getRootPart(character: Model?): BasePart?
 	if not character then
@@ -451,9 +452,11 @@ function Shared.OnStart()
 		local inset = GuiService:GetGuiInset()
 		local rawViewportPos = Vector2.new(pos.X, pos.Y)
 		local insetViewportPos = Vector2.new(pos.X - inset.X, pos.Y - inset.Y)
-
-		local TOUCH_NEAR_RADIUS_STUDS = 10
-		if shouldOpenFromViewportTap(rawViewportPos, TOUCH_NEAR_RADIUS_STUDS) or shouldOpenFromViewportTap(insetViewportPos, TOUCH_NEAR_RADIUS_STUDS) then
+		-- Important: do NOT allow a wide "near character" radius on touch.
+		-- When the camera is close, the ray origin is near the character, which makes
+		-- almost any tap qualify as "near" and opens the shop everywhere.
+		if shouldOpenFromViewportTap(rawViewportPos, nil, TOUCH_CELL_SCREEN_TOLERANCE_PX)
+			or shouldOpenFromViewportTap(insetViewportPos, nil, TOUCH_CELL_SCREEN_TOLERANCE_PX) then
 			Gui.Enabled = true
 		end
 	end
