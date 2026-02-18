@@ -84,6 +84,75 @@ local pendingCameraFlushScheduled = false
 local cinematicRunning = false
 local lastCinematicAt = -1e9
 
+local hiddenOverlayKeys: { [string]: boolean } = {}
+local overlayWatcherConn: RBXScriptConnection? = nil
+
+local function ensureOverlayWatcher()
+	if overlayWatcherConn then
+		return
+	end
+	local overlayFolder = Workspace:FindFirstChild("CapturedCellOverlays")
+	if not overlayFolder or not overlayFolder:IsA("Folder") then
+		return
+	end
+	overlayWatcherConn = overlayFolder.DescendantAdded:Connect(function(inst)
+		if not inst:IsA("BasePart") then
+			return
+		end
+		local key = inst.Name
+		if hiddenOverlayKeys[key] then
+			(inst :: BasePart).LocalTransparencyModifier = 1
+		end
+	end)
+end
+
+local function setLocalOverlayHidden(cellKey: string, hidden: boolean)
+	local overlayFolder = Workspace:FindFirstChild("CapturedCellOverlays")
+	if not overlayFolder or not overlayFolder:IsA("Folder") then
+		return
+	end
+	for _, eventFolder in ipairs((overlayFolder :: Folder):GetChildren()) do
+		if not eventFolder:IsA("Folder") then
+			continue
+		end
+		local p = eventFolder:FindFirstChild(cellKey)
+		if p and p:IsA("BasePart") then
+			(p :: BasePart).LocalTransparencyModifier = if hidden then 1 else 0
+			return
+		end
+	end
+end
+
+local function canStartCaptureCinematic(): boolean
+	if cinematicRunning then
+		return false
+	end
+	local now = os.clock()
+	return (now - lastCinematicAt) >= CAMERA_COOLDOWN_SECONDS
+end
+
+local function hideFinalCapturedForKey(key: string)
+	delayedRevealByKey[key] = true
+	landedRevealByKey[key] = false
+	hiddenOverlayKeys[key] = true
+	ensureOverlayWatcher()
+	setLocalOverlayHidden(key, true)
+	local entry = entriesByKey[key]
+	if entry then
+		entry.gui.Enabled = false
+		entry.surfaceGui.Enabled = false
+	end
+	refreshAll()
+end
+
+local function revealFinalCapturedForKey(key: string)
+	landedRevealByKey[key] = true
+	delayedRevealByKey[key] = nil
+	hiddenOverlayKeys[key] = nil
+	setLocalOverlayHidden(key, false)
+	refreshAll()
+end
+
 local function getCurrentCamera(): Camera?
 	local cam = Workspace.CurrentCamera
 	if cam and cam:IsA("Camera") then
@@ -138,13 +207,10 @@ local function getHorizontalBackVectorFromCamera(cam: Camera): Vector3
 end
 
 local function playCaptureCameraCinematic(keys: { string })
-	if cinematicRunning then
+	if not canStartCaptureCinematic() then
 		return
 	end
 	local now = os.clock()
-	if (now - lastCinematicAt) < CAMERA_COOLDOWN_SECONDS then
-		return
-	end
 
 	local bp = getBaseplate()
 	if not bp then
@@ -182,69 +248,51 @@ local function playCaptureCameraCinematic(keys: { string })
 	local originalCFrame = cam.CFrame
 	local originalFov = cam.FieldOfView
 
-	local function spawnCaptureVfx()
-		local capturedFolder = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+	local capturedFolder = ReplicatedStorage:FindFirstChild(CAPTURED_BLOCKS_FOLDER_NAME)
+
+	local function createVfxTextOnPart(part: BasePart, marker: Instance, ix: number, iz: number): (SurfaceGui, TextLabel)
+		local diagonalRotation = if ((ix + iz) % 2) == 0 then CAPTURED_DIAGONAL_ROT_A else CAPTURED_DIAGONAL_ROT_B
+		local surfaceGui = Instance.new("SurfaceGui")
+		surfaceGui.Name = "CapturedVfxSurfaceGui"
+		surfaceGui.Adornee = part
+		surfaceGui.Face = Enum.NormalId.Top
+		surfaceGui.AlwaysOnTop = false
+		surfaceGui.LightInfluence = 0
+		surfaceGui.ResetOnSpawn = false
+		surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		surfaceGui.PixelsPerStud = CAPTURED_PIXELS_PER_STUD
+		surfaceGui.Enabled = true
+		surfaceGui.Parent = part
+
+		local surfaceLabel = Instance.new("TextLabel")
+		surfaceLabel.Name = "Text"
+		surfaceLabel.BackgroundTransparency = 1
+		surfaceLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		surfaceLabel.Position = UDim2.fromScale(0.5, 0.5)
+		surfaceLabel.Size = UDim2.fromScale(1.3, 1.3)
+		surfaceLabel.Text = CAPTURED_TEXT
+		surfaceLabel.TextScaled = true
+		surfaceLabel.TextWrapped = true
+		surfaceLabel.Font = Enum.Font.LuckiestGuy
+		-- Colors/stroke are applied from marker attributes.
+		surfaceLabel.TextColor3 = Color3.new(1, 1, 1)
+		surfaceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+		surfaceLabel.TextStrokeTransparency = 0
+		surfaceLabel.Rotation = getHintRotationForLocalPlayer() + diagonalRotation
+		surfaceLabel.Parent = surfaceGui
+
+		applyCapturedTextStyle(surfaceLabel, marker)
+		return surfaceGui, surfaceLabel
+	end
+
+	local function getOwnedKeysAndPreHide(): { string }
+		local ownedKeys: { string } = {}
 		if not capturedFolder or not capturedFolder:IsA("Folder") then
-			return
+			return ownedKeys
 		end
-			local overlayFolder = Workspace:FindFirstChild("CapturedCellOverlays")
-
-			local function setLocalOverlayHidden(cellKey: string, hidden: boolean)
-				if not overlayFolder or not overlayFolder:IsA("Folder") then
-					return
-				end
-				for _, eventFolder in ipairs((overlayFolder :: Folder):GetChildren()) do
-					if not eventFolder:IsA("Folder") then
-						continue
-					end
-					local p = eventFolder:FindFirstChild(cellKey)
-					if p and p:IsA("BasePart") then
-						(p :: BasePart).LocalTransparencyModifier = if hidden then 1 else 0
-						return
-					end
-				end
-			end
-
-			local function createVfxTextOnPart(part: BasePart, marker: Instance, ix: number, iz: number)
-				local diagonalRotation = if ((ix + iz) % 2) == 0 then CAPTURED_DIAGONAL_ROT_A else CAPTURED_DIAGONAL_ROT_B
-				local surfaceGui = Instance.new("SurfaceGui")
-				surfaceGui.Name = "CapturedVfxSurfaceGui"
-				surfaceGui.Adornee = part
-				surfaceGui.Face = Enum.NormalId.Top
-				surfaceGui.AlwaysOnTop = false
-				surfaceGui.LightInfluence = 0
-				surfaceGui.ResetOnSpawn = false
-				surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-				surfaceGui.PixelsPerStud = CAPTURED_PIXELS_PER_STUD
-				surfaceGui.Enabled = true
-				surfaceGui.Parent = part
-
-				local surfaceLabel = Instance.new("TextLabel")
-				surfaceLabel.Name = "Text"
-				surfaceLabel.BackgroundTransparency = 1
-				surfaceLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-				surfaceLabel.Position = UDim2.fromScale(0.5, 0.5)
-				surfaceLabel.Size = UDim2.fromScale(1.3, 1.3)
-				surfaceLabel.Text = CAPTURED_TEXT
-				surfaceLabel.TextScaled = true
-				surfaceLabel.TextWrapped = true
-				surfaceLabel.Font = Enum.Font.LuckiestGuy
-				-- Colors/stroke are applied from marker attributes.
-				surfaceLabel.TextColor3 = Color3.new(1, 1, 1)
-				surfaceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-				surfaceLabel.TextStrokeTransparency = 0
-				surfaceLabel.Rotation = getHintRotationForLocalPlayer() + diagonalRotation
-				surfaceLabel.Parent = surfaceGui
-
-				applyCapturedTextStyle(surfaceLabel, marker)
-			end
 
 		for _, key in ipairs(keys) do
-			local ix, iz = GridCells.ParseCellKey(key)
-			if ix == nil or iz == nil then
-				continue
-			end
-			local marker = capturedFolder:FindFirstChild(key)
+			local marker = (capturedFolder :: Folder):FindFirstChild(key)
 			if not marker then
 				continue
 			end
@@ -253,14 +301,29 @@ local function playCaptureCameraCinematic(keys: { string })
 				continue
 			end
 
-			-- Hide the normal overlay/text until the falling square lands.
-			delayedRevealByKey[key] = true
-			landedRevealByKey[key] = false
-			setLocalOverlayHidden(key, true)
-			local existingEntry = entriesByKey[key]
-			if existingEntry then
-				existingEntry.gui.Enabled = false
-				existingEntry.surfaceGui.Enabled = false
+			-- Should already be hidden from ChildAdded, but keep it idempotent here.
+			hideFinalCapturedForKey(key)
+
+			table.insert(ownedKeys, key)
+		end
+
+		return ownedKeys
+	end
+
+	local function spawnCaptureVfx()
+		if not capturedFolder or not capturedFolder:IsA("Folder") then
+			return
+		end
+
+		local ownedKeys = getOwnedKeysAndPreHide()
+		for _, key in ipairs(ownedKeys) do
+			local ix, iz = GridCells.ParseCellKey(key)
+			if ix == nil or iz == nil then
+				continue
+			end
+			local marker = (capturedFolder :: Folder):FindFirstChild(key)
+			if not marker then
+				continue
 			end
 			local color = marker:GetAttribute("CaptureColor")
 			local color3: Color3 = if typeof(color) == "Color3" then (color :: Color3) else Color3.new(1, 1, 1)
@@ -284,7 +347,11 @@ local function playCaptureCameraCinematic(keys: { string })
 			part.CFrame = bp.CFrame * CFrame.new(xCenter, startYLocal, zCenter)
 			part.Parent = Workspace
 			Debris:AddItem(part, VFX_LIFETIME_MAX)
-			createVfxTextOnPart(part, marker, ix :: number, iz :: number)
+			local vfxSurfaceGui, vfxSurfaceLabel = createVfxTextOnPart(part, marker, ix :: number, iz :: number)
+			-- Ensure the square + text appear together when the drop starts.
+			vfxSurfaceGui.Enabled = false
+			vfxSurfaceLabel.TextTransparency = 1
+			vfxSurfaceLabel.TextStrokeTransparency = 1
 
 			local startDelay = vfxRng:NextNumber(0, VFX_START_DELAY_MAX)
 			local dropDuration = vfxRng:NextNumber(VFX_DROP_DURATION_MIN, VFX_DROP_DURATION_MAX)
@@ -294,6 +361,14 @@ local function playCaptureCameraCinematic(keys: { string })
 				if part.Parent == nil then
 					return
 				end
+				if vfxSurfaceGui.Parent ~= nil then
+					vfxSurfaceGui.Enabled = true
+				end
+				TweenService:Create(
+					vfxSurfaceLabel,
+					TweenInfo.new(VFX_FADE_IN_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{ TextTransparency = 0, TextStrokeTransparency = 0 }
+				):Play()
 				-- Fade in quickly as it starts falling.
 				TweenService:Create(
 					part,
@@ -310,11 +385,8 @@ local function playCaptureCameraCinematic(keys: { string })
 				dropTween:Play()
 				dropTween.Completed:Wait()
 
-					-- Landed: reveal the normal overlay/text for this cell.
-					landedRevealByKey[key] = true
-					delayedRevealByKey[key] = nil
-					setLocalOverlayHidden(key, false)
-					refreshAll()
+				-- Landed: reveal the normal overlay/text for this cell.
+				revealFinalCapturedForKey(key)
 
 				if part.Parent == nil then
 					return
@@ -328,6 +400,11 @@ local function playCaptureCameraCinematic(keys: { string })
 					TweenInfo.new(VFX_FADE_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 					{ Transparency = 1 }
 				)
+				TweenService:Create(
+					vfxSurfaceLabel,
+					TweenInfo.new(VFX_FADE_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+					{ TextTransparency = 1, TextStrokeTransparency = 1 }
+				):Play()
 				fadeOut:Play()
 				fadeOut.Completed:Wait()
 				pcall(function()
@@ -343,10 +420,7 @@ local function playCaptureCameraCinematic(keys: { string })
 				if marker.Parent == nil then
 					return
 				end
-				landedRevealByKey[key] = true
-				delayedRevealByKey[key] = nil
-				setLocalOverlayHidden(key, false)
-				refreshAll()
+				revealFinalCapturedForKey(key)
 			end)
 		end
 	end
@@ -404,7 +478,7 @@ local function flushPendingCameraKeys()
 	pendingCameraFlushScheduled = true
 
 	-- Aggregate keys for a single capture event (markers are added one-by-one).
-	task.delay(0.15, function()
+	task.delay(0.08, function()
 		pendingCameraFlushScheduled = false
 		local keys: { string } = {}
 		for key in pairs(pendingCameraKeys) do
@@ -421,6 +495,9 @@ local function enqueueCameraForMarker(marker: Instance)
 	local key = marker.Name
 	local ownerUserId = tryGetCaptureOwnerUserId(marker)
 	if ownerUserId == player.UserId then
+		if canStartCaptureCinematic() then
+			hideFinalCapturedForKey(key)
+		end
 		pendingCameraKeys[key] = true
 		flushPendingCameraKeys()
 		return
@@ -431,6 +508,9 @@ local function enqueueCameraForMarker(marker: Instance)
 	conn = marker:GetAttributeChangedSignal("CaptureOwnerUserId"):Connect(function()
 		local v = tryGetCaptureOwnerUserId(marker)
 		if v == player.UserId then
+			if canStartCaptureCinematic() then
+				hideFinalCapturedForKey(key)
+			end
 			pendingCameraKeys[key] = true
 			flushPendingCameraKeys()
 			if conn then
