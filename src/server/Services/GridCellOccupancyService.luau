@@ -194,10 +194,13 @@ local occupiedByKey: {
 
 local Shared = {}
 
+local highlightCapturedRegion: (baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string }) -> ()
+
 -- Capture detection (enclosed empty regions)
 local CAPTURE_OVERLAY_FOLDER_NAME = "CapturedCellOverlays"
-local CAPTURE_OVERLAY_HEIGHT = 0.12
-local CAPTURE_OVERLAY_Y_GAP = 0.28
+-- Align captured overlay plane with the standard NPC cell overlay plane.
+local CAPTURE_OVERLAY_HEIGHT = OVERLAY_HEIGHT
+local CAPTURE_OVERLAY_Y_GAP = OVERLAY_Y_GAP
 local CAPTURE_OVERLAY_TRANSPARENCY = 0.35
 
 local function ensureCaptureOverlayFolder(): Folder
@@ -287,6 +290,226 @@ local function isWallOfPlayer(ix: number, iz: number, userId: number, cellsX: nu
 	end
 
 	return false
+end
+
+-- Preview helpers: used to predict captures BEFORE we actually occupy a cell.
+-- This lets callers pick a safe teleport destination without moving the player onto a soon-to-be-captured cell.
+type KeyBoolMap = { [string]: boolean }
+type KeyOwnerMap = { [string]: number }
+
+local function isTrulyEmptyKeyPreview(key: string, previewNonEmpty: KeyBoolMap?): boolean
+	if previewNonEmpty and previewNonEmpty[key] then
+		return false
+	end
+	return isTrulyEmptyKey(key)
+end
+
+local function isTrulyEmptyPreview(ix: number, iz: number, cellsX: number, cellsZ: number, previewNonEmpty: KeyBoolMap?): boolean
+	if not withinBounds(ix, iz, cellsX, cellsZ) then
+		return false
+	end
+	return isTrulyEmptyKeyPreview(GridCells.GetCellKey(ix, iz), previewNonEmpty)
+end
+
+local function isWallOfPlayerPreview(ix: number, iz: number, userId: number, cellsX: number, cellsZ: number, previewWallOwners: KeyOwnerMap?): boolean
+	if not withinBounds(ix, iz, cellsX, cellsZ) then
+		return false
+	end
+	local key = GridCells.GetCellKey(ix, iz)
+	if previewWallOwners and previewWallOwners[key] == userId then
+		return true
+	end
+	return isWallOfPlayer(ix, iz, userId, cellsX, cellsZ)
+end
+
+local function floodFillEmptyRegionPreview(
+	startIx: number,
+	startIz: number,
+	cellsX: number,
+	cellsZ: number,
+	visited: KeyBoolMap,
+	previewNonEmpty: KeyBoolMap?
+): ({ string }, KeyBoolMap, boolean)
+	local regionKeys: { string } = {}
+	local regionSet: KeyBoolMap = {}
+	local touchesBorder = false
+
+	local queueIx: { number } = {}
+	local queueIz: { number } = {}
+	local head = 1
+
+	local function push(ix: number, iz: number)
+		local key = GridCells.GetCellKey(ix, iz)
+		if visited[key] then
+			return
+		end
+		if not isTrulyEmptyKeyPreview(key, previewNonEmpty) then
+			return
+		end
+		visited[key] = true
+		table.insert(queueIx, ix)
+		table.insert(queueIz, iz)
+	end
+
+	push(startIx, startIz)
+
+	while head <= #queueIx do
+		local ix = queueIx[head]
+		local iz = queueIz[head]
+		head += 1
+
+		local key = GridCells.GetCellKey(ix, iz)
+		if not regionSet[key] then
+			regionSet[key] = true
+			table.insert(regionKeys, key)
+		end
+
+		if ix == 0 or iz == 0 or ix == (cellsX - 1) or iz == (cellsZ - 1) then
+			touchesBorder = true
+		end
+
+		-- 4-neighbor expansion
+		if ix > 0 then
+			push(ix - 1, iz)
+		end
+		if ix < cellsX - 1 then
+			push(ix + 1, iz)
+		end
+		if iz > 0 then
+			push(ix, iz - 1)
+		end
+		if iz < cellsZ - 1 then
+			push(ix, iz + 1)
+		end
+	end
+
+	return regionKeys, regionSet, touchesBorder
+end
+
+local function isRegionEnclosedByPlayerPreview(
+	regionKeys: { string },
+	regionSet: KeyBoolMap,
+	userId: number,
+	cellsX: number,
+	cellsZ: number,
+	previewNonEmpty: KeyBoolMap?,
+	previewWallOwners: KeyOwnerMap?
+): boolean
+	for _, key in ipairs(regionKeys) do
+		local ix, iz = GridCells.ParseCellKey(key)
+		if ix == nil or iz == nil then
+			return false
+		end
+
+		local function checkNeighbor(nx: number, nz: number): boolean
+			if not withinBounds(nx, nz, cellsX, cellsZ) then
+				return false
+			end
+			local nKey = GridCells.GetCellKey(nx, nz)
+			if regionSet[nKey] then
+				return true
+			end
+			if isTrulyEmptyKeyPreview(nKey, previewNonEmpty) then
+				return true
+			end
+			return isWallOfPlayerPreview(nx, nz, userId, cellsX, cellsZ, previewWallOwners)
+		end
+
+		local x = ix :: number
+		local z = iz :: number
+		if not checkNeighbor(x - 1, z) then
+			return false
+		end
+		if not checkNeighbor(x + 1, z) then
+			return false
+		end
+		if not checkNeighbor(x, z - 1) then
+			return false
+		end
+		if not checkNeighbor(x, z + 1) then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function predictCaptureRegionsAroundKey(baseplate: BasePart, placedKey: string, userId: number): { { string } }
+	local regions: { { string } } = {}
+	if userId <= 0 then
+		return regions
+	end
+	local ix, iz = GridCells.ParseCellKey(placedKey)
+	if ix == nil or iz == nil then
+		return regions
+	end
+	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
+	if cellsX <= 0 or cellsZ <= 0 then
+		return regions
+	end
+
+	-- Treat the placed cell as a wall for this player (even if it is only reserved right now).
+	local previewNonEmpty: KeyBoolMap = { [placedKey] = true }
+	local previewWallOwners: KeyOwnerMap = { [placedKey] = userId }
+
+	local visited: KeyBoolMap = {}
+	local neighborStarts: { { number } } = {}
+	for dx = -1, 1 do
+		for dz = -1, 1 do
+			if dx == 0 and dz == 0 then
+				continue
+			end
+			table.insert(neighborStarts, { (ix :: number) + dx, (iz :: number) + dz })
+		end
+	end
+
+	for _, pair in ipairs(neighborStarts) do
+		local nx = pair[1]
+		local nz = pair[2]
+		if withinBounds(nx, nz, cellsX, cellsZ) and isTrulyEmptyPreview(nx, nz, cellsX, cellsZ, previewNonEmpty) then
+			local regionKeys, regionSet, touchesBorder =
+				floodFillEmptyRegionPreview(nx, nz, cellsX, cellsZ, visited, previewNonEmpty)
+			if #regionKeys == 0 then
+				continue
+			end
+			local enclosed = (not touchesBorder)
+				and isRegionEnclosedByPlayerPreview(
+					regionKeys,
+					regionSet,
+					userId,
+					cellsX,
+					cellsZ,
+					previewNonEmpty,
+					previewWallOwners
+				)
+			if enclosed then
+				table.insert(regions, regionKeys)
+			end
+		end
+	end
+
+	return regions
+end
+
+-- Predict which empty regions WOULD be captured if `placedKey` becomes an occupied wall for `userId`.
+-- Returns a list of regions; each region is a list of cell keys.
+function Shared.PredictCaptureRegionsAroundKey(baseplate: BasePart, placedKey: string, userId: number): { { string } }
+	return predictCaptureRegionsAroundKey(baseplate, placedKey, userId)
+end
+
+-- Apply a predicted set of capture regions (no recomputation). This is intended to be called after a
+-- successful FinalizeReservation where the placed key is now actually occupied.
+function Shared.ApplyCaptureRegionsForTeam(baseplate: BasePart, userId: number, teamColorName: string, regions: { { string } })
+	if #regions == 0 then
+		return
+	end
+	if type(teamColorName) ~= "string" or teamColorName == "" then
+		teamColorName = "white"
+	end
+	local baseTeamColor3 = TeamColors.GetColor3(teamColorName)
+	for _, regionKeys in ipairs(regions) do
+		highlightCapturedRegion(baseplate, userId, baseTeamColor3, regionKeys)
+	end
 end
 
 local function floodFillEmptyRegion(startIx: number, startIz: number, cellsX: number, cellsZ: number, visited: { [string]: boolean }): ({ string }, { [string]: boolean }, boolean)
@@ -477,7 +700,7 @@ local function getEnclosureFailureSummary(regionKeys: { string }, regionSet: { [
 	return summary ~= "" and summary or "noDetails"
 end
 
-local function highlightCapturedRegion(baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string })
+highlightCapturedRegion = function(baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string })
 	if #regionKeys == 0 then
 		return
 	end

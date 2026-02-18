@@ -74,7 +74,13 @@ local function getGroundPositionAt(worldXZ: Vector3, ignoreInstances: { Instance
 	return worldXZ
 end
 
-local function findNearestFreeCell(baseplate: BasePart, startIx: number, startIz: number, excludedKey: string): (number?, number?)
+local function findNearestFreeCell(
+	baseplate: BasePart,
+	startIx: number,
+	startIz: number,
+	excludedKey: string,
+	disallowedKeys: { [string]: boolean }?
+): (number?, number?)
 	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
 
 	local function isFree(ix: number, iz: number): boolean
@@ -83,6 +89,9 @@ local function findNearestFreeCell(baseplate: BasePart, startIx: number, startIz
 		end
 		local key = GridCells.GetCellKey(ix, iz)
 		if key == excludedKey then
+			return false
+		end
+		if disallowedKeys and disallowedKeys[key] then
 			return false
 		end
 		return not GridCellOccupancyService.IsBlocked(key)
@@ -152,7 +161,17 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 		return false, "cell_occupied"
 	end
 
-	local freeIx, freeIz = findNearestFreeCell(baseplate, ix, iz, cellKey)
+	-- Predict which regions will become captured once this reserved cell becomes an occupied wall.
+	-- Use this to ensure we never teleport the player onto a cell that's about to be captured.
+	local predictedRegions = GridCellOccupancyService.PredictCaptureRegionsAroundKey(baseplate, cellKey, player.UserId)
+	local disallowedKeys: { [string]: boolean } = {}
+	for _, regionKeys in ipairs(predictedRegions) do
+		for _, k in ipairs(regionKeys) do
+			disallowedKeys[k] = true
+		end
+	end
+
+	local freeIx, freeIz = findNearestFreeCell(baseplate, ix, iz, cellKey, disallowedKeys)
 	if freeIx == nil or freeIz == nil then
 		GridCellOccupancyService.CancelReservation(cellKey)
 		return false, "no_free_cell"
@@ -187,7 +206,17 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 		return false, "spawn_failed"
 	end
 
+	-- We'll apply the predicted captures ourselves (no extra flood-fill pass), so skip the default check.
+	pcall(function()
+		npc:SetAttribute("SkipCaptureCheck", true)
+	end)
+
 	GridCellOccupancyService.FinalizeReservation(cellKey, npc, baseplate)
+	local actualColorName = TeamColorService.GetColorForPlayer(player)
+	if type(actualColorName) == "string" and actualColorName ~= "" then
+		teamColorName = actualColorName
+	end
+	GridCellOccupancyService.ApplyCaptureRegionsForTeam(baseplate, player.UserId, teamColorName, predictedRegions)
 	return true, nil
 end
 

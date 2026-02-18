@@ -32,8 +32,10 @@ local VFX_FADE_OUT_SECONDS = 0.35
 local VFX_HOLD_AFTER_LAND_MIN = 0.25
 local VFX_HOLD_AFTER_LAND_MAX = 0.7
 local VFX_TRANSPARENCY_VISIBLE = 0.25
-local VFX_THICKNESS = 0.12
-local VFX_Y_OFFSET_ABOVE_SURFACE = 0.44
+-- Match the server NPC "occupied cell" overlay thickness/height so the VFX square
+-- lands exactly flush with it (both bottom and top).
+local VFX_THICKNESS = 0.18
+local VFX_Y_OFFSET_ABOVE_SURFACE = 0.02
 local VFX_LIFETIME_MAX = 4.5
 local vfxRng = Random.new()
 
@@ -329,7 +331,8 @@ local function playCaptureCameraCinematic(keys: { string })
 			local color3: Color3 = if typeof(color) == "Color3" then (color :: Color3) else Color3.new(1, 1, 1)
 
 			local xCenter, zCenter = GridCells.GetCellCenterLocalXZ(bp, ix, iz)
-			local endYLocal = (bp.Size.Y / 2) + (VFX_THICKNESS / 2) + VFX_Y_OFFSET_ABOVE_SURFACE
+			local thickness = VFX_THICKNESS
+			local endYLocal = (bp.Size.Y / 2) + (thickness / 2) + VFX_Y_OFFSET_ABOVE_SURFACE
 			local startHeight = vfxRng:NextNumber(VFX_START_HEIGHT_MIN, VFX_START_HEIGHT_MAX)
 			local startYLocal = endYLocal + startHeight
 
@@ -343,7 +346,7 @@ local function playCaptureCameraCinematic(keys: { string })
 			part.Material = Enum.Material.SmoothPlastic
 			part.Color = color3
 			part.Transparency = 1
-			part.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, VFX_THICKNESS, GridCells.SQUARE_SIZE_STUDS)
+			part.Size = Vector3.new(GridCells.SQUARE_SIZE_STUDS, thickness, GridCells.SQUARE_SIZE_STUDS)
 			part.CFrame = bp.CFrame * CFrame.new(xCenter, startYLocal, zCenter)
 			part.Parent = Workspace
 			Debris:AddItem(part, VFX_LIFETIME_MAX)
@@ -384,6 +387,10 @@ local function playCaptureCameraCinematic(keys: { string })
 				)
 				dropTween:Play()
 				dropTween.Completed:Wait()
+				-- Snap to the exact landing pose; prevents any residual offset.
+				if part.Parent ~= nil then
+					part.CFrame = endCFrame
+				end
 
 				-- Landed: reveal the normal overlay/text for this cell.
 				revealFinalCapturedForKey(key)
