@@ -1,8 +1,19 @@
 -- ServerScriptService.ShopDevProductHandler
 -- Prompts Developer Product purchases from client UI
+--
+-- Security Features:
+-- 1. DevProductId Whitelist: Only allows DevProductIds defined in ShopConfig
+-- 2. Rate Limiting: Prevents spam by limiting to one request per 2 seconds per player
+-- 3. Type Validation: Ensures devId parameter is a valid number
+--
+-- Note: DevProductId whitelist is built at script initialization. If ShopConfig changes
+-- at runtime, the script must be reloaded for changes to take effect.
 
 local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("ShopConfig"))
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local PromptDevProduct = Remotes:WaitForChild("PromptDevProduct")
@@ -11,10 +22,50 @@ if not PromptDevProduct:IsA("RemoteEvent") then
 	error("[ShopDevProductHandler] ReplicatedStorage.Remotes.PromptDevProduct must be a RemoteEvent")
 end
 
+-- Rate limiting
+local lastPromptTime: { [number]: number } = {}
+local RATE_LIMIT_SECONDS = 2.0
+
+-- Build a set of valid DevProductIds from ShopConfig
+local function getValidDevProductIds(): { [number]: boolean }
+	local validIds = {}
+	for _, itemConfig in pairs(ShopConfig.Config.Items) do
+		local devProductId = tonumber(itemConfig.DevProductId)
+		if devProductId and devProductId > 0 then
+			validIds[devProductId] = true
+		end
+	end
+	return validIds
+end
+
+local validDevProductIds = getValidDevProductIds()
+
+-- Cleanup rate limiting table when players leave to prevent memory leak
+Players.PlayerRemoving:Connect(function(player)
+	lastPromptTime[player.UserId] = nil
+end)
+
 PromptDevProduct.OnServerEvent:Connect(function(player, devId)
+	-- Type validation
 	local id = tonumber(devId)
 	if not id then
-		warn("[ShopDevProductHandler] Invalid devId from", player.Name)
+		warn("[ShopDevProductHandler] Invalid devId type from", player.Name, typeof(devId))
+		return
+	end
+
+	-- Rate limiting
+	local now = os.clock()
+	local userId = player.UserId
+	local lastTime = lastPromptTime[userId]
+	if lastTime and (now - lastTime) < RATE_LIMIT_SECONDS then
+		warn("[ShopDevProductHandler] Rate limit exceeded for", player.Name)
+		return
+	end
+	lastPromptTime[userId] = now
+
+	-- Validate DevProductId is in whitelist
+	if not validDevProductIds[id] then
+		warn("[ShopDevProductHandler] DevProductId", id, "not in whitelist from", player.Name)
 		return
 	end
 
