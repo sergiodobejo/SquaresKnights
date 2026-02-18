@@ -208,6 +208,66 @@ local function getHorizontalBackVectorFromCamera(cam: Camera): Vector3
 	return -horizontal.Unit
 end
 
+local function isCinematicLineOfSightClear(fromWorld: Vector3, toWorld: Vector3, ignoreInstances: { Instance }): boolean
+	local dir = toWorld - fromWorld
+	if dir.Magnitude <= 1e-3 then
+		return true
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignoreInstances
+	params.IgnoreWater = true
+
+	local hit = Workspace:Raycast(fromWorld, dir, params)
+	return hit == nil
+end
+
+local function chooseCinematicCameraCFrame(cam: Camera, bp: BasePart, lookAtWorld: Vector3, horizontalBack: Vector3, distance: number, height: number): CFrame
+	local up = Vector3.new(0, 1, 0)
+	local back = Vector3.new(horizontalBack.X, 0, horizontalBack.Z)
+	if back.Magnitude < 1e-3 then
+		back = Vector3.new(0, 0, 1)
+	else
+		back = back.Unit
+	end
+	local left = Vector3.new(-back.Z, 0, back.X)
+	local right = -left
+
+	local ignore: { Instance } = { bp }
+	local character = player.Character
+	if character then
+		table.insert(ignore, character)
+	end
+	for _, name in ipairs({ "CellOverlays", "ReservedCellOverlays", "CapturedCellOverlays" }) do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(ignore, folder)
+		end
+	end
+
+	local candidates = {
+		back,
+		-back,
+		left,
+		right,
+		(back + left).Unit,
+		(back + right).Unit,
+		(-back + left).Unit,
+		(-back + right).Unit,
+	}
+
+	for _, dir in ipairs(candidates) do
+		local targetPos = lookAtWorld + (dir * distance) + (up * height)
+		if isCinematicLineOfSightClear(lookAtWorld + (up * 1.0), targetPos, ignore) then
+			return CFrame.lookAt(targetPos, lookAtWorld)
+		end
+	end
+
+	local fallbackPos = lookAtWorld + (back * distance) + (up * height)
+	return CFrame.lookAt(fallbackPos, lookAtWorld)
+end
+
 local function playCaptureCameraCinematic(keys: { string })
 	if not canStartCaptureCinematic() then
 		return
@@ -243,8 +303,7 @@ local function playCaptureCameraCinematic(keys: { string })
 		distance = CAMERA_MAX_HORIZONTAL_DISTANCE
 	end
 	local height = (distance * CAMERA_HEIGHT_RATIO) + 10
-	local targetPos = targetWorld + (horizontalBack * distance) + Vector3.new(0, height, 0)
-	local targetCFrame = CFrame.lookAt(targetPos, targetWorld)
+	local targetCFrame = chooseCinematicCameraCFrame(cam, bp, targetWorld, horizontalBack, distance, height)
 
 	local originalType = cam.CameraType
 	local originalCFrame = cam.CFrame
