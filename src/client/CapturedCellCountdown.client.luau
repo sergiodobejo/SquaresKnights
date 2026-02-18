@@ -451,6 +451,16 @@ local function playCaptureCameraCinematic(keys: { string })
 					part.CFrame = endCFrame
 				end
 
+				-- Avoid a brief "blur" caused by two overlapping SurfaceGuis (the landing VFX text
+				-- and the final captured plate text) being visible at the same time.
+				if vfxSurfaceLabel.Parent ~= nil then
+					vfxSurfaceLabel.TextTransparency = 1
+					vfxSurfaceLabel.TextStrokeTransparency = 1
+				end
+				if vfxSurfaceGui.Parent ~= nil then
+					vfxSurfaceGui.Enabled = false
+				end
+
 				-- Landed: reveal the normal overlay/text for this cell.
 				revealFinalCapturedForKey(key)
 
