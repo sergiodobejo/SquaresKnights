@@ -96,8 +96,9 @@ local function createButton(parent: Instance, bg: Color3, textColor: Color3, str
 	local padding = Instance.new("UIPadding")
 	padding.PaddingLeft = UDim.new(0, 10)
 	padding.PaddingRight = UDim.new(0, 10)
-	padding.PaddingTop = UDim.new(0, 6)
-	padding.PaddingBottom = UDim.new(0, 6)
+	-- Slightly bias vertical padding so the LuckiestGuy glyphs are visually centered.
+	padding.PaddingTop = UDim.new(0, 10)
+	padding.PaddingBottom = UDim.new(0, 2)
 	padding.Parent = button
 
 	local corner = Instance.new("UICorner")

@@ -1,6 +1,7 @@
 -- PATH: StarterPlayer.StarterPlayerScripts.Controllers.Guis.Shop
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Workspace = game:GetService("Workspace")
@@ -10,6 +11,8 @@ local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local FormatNumber = require(ReplicatedStorage.Libs.FormatNumber.Simple)
 local NpcIconRenderer = require(script.Parent.Parent:WaitForChild("NpcIconRenderer"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
+local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local BuyItemRemote = Remotes:WaitForChild("BuyItem")
 local PromptDevProductRemote = Remotes:FindFirstChild("PromptDevProduct")
@@ -30,6 +33,12 @@ local Shared = {}
 
 local started = false
 
+local NOT_ENOUGH_MONEY_SOUND_ID = "rbxassetid://71887292352019"
+local SHOP_SUCCESS_CLOSE_SOUND_ID = "rbxassetid://117006835091805"
+
+local pendingPurchaseItemName: string? = nil
+local pendingPurchaseExpiresAt = 0
+
 -- When closing the shop on mobile, the same tap can be observed by our tap-to-open logic
 -- after Gui.Enabled flips to false. Suppress re-open briefly to avoid instant reopen.
 local suppressWorldTapUntil = 0
@@ -37,6 +46,134 @@ local suppressWorldTapUntil = 0
 function Local.CloseShop()
 	Gui.Enabled = false
 	suppressWorldTapUntil = os.clock() + 0.25
+end
+
+local function playOneShotSound(soundId: string)
+	SoundCache.Play(soundId, {
+		parent = SoundService,
+		poolSize = 3,
+	})
+end
+
+local function getLocalCoins(): number
+	local player = Players.LocalPlayer
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local coins = leaderstats and leaderstats:FindFirstChild("Coins")
+	if coins and coins:IsA("IntValue") then
+		return coins.Value
+	end
+	return 0
+end
+
+local function getFontSourceLabel(): TextLabel?
+	-- Prefer the item Template title styling (our shop font).
+	local template = Buffs:FindFirstChild("Template")
+	if template then
+		local t = template:FindFirstChild("Title")
+		if t and t:IsA("TextLabel") then
+			return t
+		end
+	end
+
+	-- Fallback: any TextLabel within the shop frame.
+	local anyLabel = Frame:FindFirstChildWhichIsA("TextLabel", true)
+	if anyLabel and anyLabel:IsA("TextLabel") then
+		return anyLabel
+	end
+	return nil
+end
+
+local function ensureNotEnoughMoneyOverlay(): TextLabel
+	local existing = Frame:FindFirstChild("NotEnoughMoneyOverlay")
+	if existing and existing:IsA("TextLabel") then
+		return existing
+	end
+
+	local label = Instance.new("TextLabel")
+	label.Name = "NotEnoughMoneyOverlay"
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.AnchorPoint = Vector2.new(0.5, 0.5)
+	label.Position = UDim2.fromScale(0.5, 0.5)
+	label.Size = UDim2.fromScale(1, 0.12)
+	label.Text = "Not enough money"
+	label.TextWrapped = true
+	label.TextScaled = true
+	label.Visible = false
+	label.ZIndex = 999
+	label.Parent = Frame
+
+	local src = getFontSourceLabel()
+	if src then
+		pcall(function()
+			label.FontFace = src.FontFace
+		end)
+		label.TextColor3 = src.TextColor3
+		label.TextStrokeTransparency = src.TextStrokeTransparency
+		label.TextStrokeColor3 = src.TextStrokeColor3
+	end
+
+	-- Ensure the text outline is actually visible, even if the source label doesn't use it.
+	if label.TextStrokeTransparency >= 0.95 then
+		label.TextStrokeTransparency = 0.25
+	end
+	if label.TextStrokeColor3 == nil then
+		label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	end
+
+	return label
+end
+
+local notEnoughOverlayNonce = 0
+local function showNotEnoughMoneyOverlayForOneSecond()
+	notEnoughOverlayNonce += 1
+	local nonce = notEnoughOverlayNonce
+	local overlay = ensureNotEnoughMoneyOverlay()
+	overlay.Visible = true
+	playOneShotSound(NOT_ENOUGH_MONEY_SOUND_ID)
+
+	task.delay(1, function()
+		if notEnoughOverlayNonce ~= nonce then
+			return
+		end
+		if overlay.Parent ~= nil then
+			overlay.Visible = false
+		end
+	end)
+end
+
+local function npcMatchesShopItem(npc: Model, itemName: string): boolean
+	local cfg = ShopConfig.GetConfig(itemName)
+	if not cfg then
+		return false
+	end
+
+	local npcModelName = (cfg :: any).NpcModelName
+	if type(npcModelName) == "string" and npcModelName ~= "" then
+		return npc.Name == npcModelName
+	end
+
+	local kind = (cfg :: any).UnitKind
+	local class = (cfg :: any).UnitClass
+	if type(kind) == "string" and type(class) == "string" then
+		local k = npc:GetAttribute("UnitKind")
+		local c = npc:GetAttribute("UnitClass")
+		if type(k) == "string" and type(c) == "string" then
+			return k:lower() == kind:lower() and c:lower() == class:lower()
+		end
+	end
+
+	return false
+end
+
+local function beginPendingCloseOnSpawn(itemName: string, timeoutSeconds: number)
+	pendingPurchaseItemName = itemName
+	pendingPurchaseExpiresAt = os.clock() + math.max(0, timeoutSeconds)
+end
+
+local function clearPendingCloseOnSpawn()
+	pendingPurchaseItemName = nil
+	pendingPurchaseExpiresAt = 0
 end
 
 local occupancyFolder: Folder? = nil
@@ -336,6 +473,49 @@ function Shared.OnStart()
 	end)
 
 	Local.GenerateBuffButtons()
+
+	-- Preload UI sounds to avoid first-play latency.
+	task.defer(function()
+		SoundCache.Preload({ NOT_ENOUGH_MONEY_SOUND_ID, SHOP_SUCCESS_CLOSE_SOUND_ID }, {
+			parent = SoundService,
+			poolSize = 2,
+		})
+	end)
+
+	-- Close the shop when the purchased NPC successfully spawns.
+	-- We detect spawn via workspace.LiveNPC (NPCs are stamped with OwnerUserId).
+	task.defer(function()
+		local liveNpcFolder = Workspace:FindFirstChild("LiveNPC")
+		if not liveNpcFolder then
+			liveNpcFolder = Workspace:WaitForChild("LiveNPC", 15)
+		end
+		if not liveNpcFolder or not liveNpcFolder:IsA("Folder") then
+			return
+		end
+
+		liveNpcFolder.ChildAdded:Connect(function(child: Instance)
+			local itemName = pendingPurchaseItemName
+			if not itemName or os.clock() > pendingPurchaseExpiresAt then
+				clearPendingCloseOnSpawn()
+				return
+			end
+			if not child:IsA("Model") then
+				return
+			end
+			local npc = child :: Model
+			if Affiliation.GetOwnerUserIdFromModel(npc) ~= Players.LocalPlayer.UserId then
+				return
+			end
+			if not npcMatchesShopItem(npc, itemName) then
+				return
+			end
+
+			clearPendingCloseOnSpawn()
+			if Gui.Enabled then
+				Local.CloseShop()
+			end
+		end)
+	end)
 end
 
 function Local.UpdateEnabled()
@@ -502,13 +682,23 @@ function Local.GenerateBuffButtons()
 
 		if button:FindFirstChild("Buy") and button.Buy:IsA("GuiButton") then
 			button.Buy.Activated:Connect(function()
-				-- Close shop immediately on selection.
-				Local.CloseShop()
-			if isCurrentCellBlocked() then
-				warn("[Shop] Cannot spawn here: cell is occupied/reserved")
-				return
-			end
-			BuyItemRemote:FireServer(name)
+				if isCurrentCellBlocked() then
+					warn("[Shop] Cannot spawn here: cell is occupied/reserved")
+					return
+				end
+
+				local priceCoins = tonumber((config :: any).Price) or 0
+				if priceCoins > 0 then
+					local coins = getLocalCoins()
+					if coins < priceCoins then
+						showNotEnoughMoneyOverlayForOneSecond()
+						return
+					end
+				end
+
+				beginPendingCloseOnSpawn(name, 10)
+				playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
+				BuyItemRemote:FireServer(name)
 			end)
 		end
 
@@ -518,14 +708,26 @@ function Local.GenerateBuffButtons()
 			if button:FindFirstChild("BuyRobux") then
 				if button.BuyRobux:IsA("GuiButton") then
 					button.BuyRobux.Activated:Connect(function()
-					PromptDevProductRemote:FireServer(devProductId)
+						if isCurrentCellBlocked() then
+							warn("[Shop] Cannot spawn here: cell is occupied/reserved")
+							return
+						end
+						beginPendingCloseOnSpawn(name, 90)
+						playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
+						PromptDevProductRemote:FireServer(devProductId)
 					end)
 				end
 			end
 			if button:FindFirstChild("Icon") then
 				if button.Icon:IsA("GuiButton") then
 					button.Icon.Activated:Connect(function()
-					PromptDevProductRemote:FireServer(devProductId)
+						if isCurrentCellBlocked() then
+							warn("[Shop] Cannot spawn here: cell is occupied/reserved")
+							return
+						end
+						beginPendingCloseOnSpawn(name, 90)
+						playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
+						PromptDevProductRemote:FireServer(devProductId)
 					end)
 				end
 			end

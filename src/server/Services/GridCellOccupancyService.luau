@@ -4,6 +4,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local TeamColors = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamColors"))
@@ -22,6 +23,10 @@ local CAPTURE_HIGHLIGHT_SECONDS = 5
 
 local CAPTURE_SPAWN_ITEM_KEY = "Priest"
 local CAPTURE_SPAWN_HEIGHT_ABOVE_SURFACE = 4.2
+local CAPTURE_SUCCESS_SFX_ID = "rbxassetid://104267438913431"
+local CAPTURE_SUCCESS_SFX_VOLUME = 0.55
+local CAPTURE_SUCCESS_SFX_ROLLOFF_MAX_DISTANCE = 160
+local CAPTURE_SUCCESS_SFX_LIFETIME_SECONDS = 8
 local SKIP_CAPTURE_CHECK_ATTRIBUTE = "SkipCaptureCheck"
 local NPC_CELL_KEY_ATTRIBUTE = "CellKey"
 
@@ -475,6 +480,49 @@ end
 local function highlightCapturedRegion(baseplate: BasePart, userId: number, color3: Color3, regionKeys: { string })
 	if #regionKeys == 0 then
 		return
+	end
+
+	-- Play capture success SFX once per captured region.
+	do
+		local pos: Vector3? = nil
+		-- Use approximate region center.
+		local sum = Vector3.zero
+		local count = 0
+		for _, k in ipairs(regionKeys) do
+			local ix, iz = GridCells.ParseCellKey(k)
+			if ix ~= nil and iz ~= nil then
+				sum += GridCells.GetCellCenterWorld(baseplate, ix, iz)
+				count += 1
+			end
+		end
+		if count > 0 then
+			pos = sum / count
+		end
+		if pos then
+			local anchor = Instance.new("Part")
+			anchor.Name = "CaptureSuccessSfx"
+			anchor.Anchored = true
+			anchor.CanCollide = false
+			anchor.CanTouch = false
+			anchor.CanQuery = false
+			anchor.Transparency = 1
+			anchor.Size = Vector3.new(1, 1, 1)
+			anchor.CFrame = CFrame.new(pos + Vector3.new(0, 6, 0))
+			anchor.Parent = workspace
+
+			local sound = Instance.new("Sound")
+			sound.Name = "CaptureSuccess"
+			sound.SoundId = CAPTURE_SUCCESS_SFX_ID
+			sound.Volume = CAPTURE_SUCCESS_SFX_VOLUME
+			sound.RollOffMode = Enum.RollOffMode.Inverse
+			sound.RollOffMaxDistance = CAPTURE_SUCCESS_SFX_ROLLOFF_MAX_DISTANCE
+			sound.Parent = anchor
+
+			pcall(function()
+				sound:Play()
+			end)
+			Debris:AddItem(anchor, CAPTURE_SUCCESS_SFX_LIFETIME_SECONDS)
+		end
 	end
 
 	local captureFolder = ensureCaptureOverlayFolder()
