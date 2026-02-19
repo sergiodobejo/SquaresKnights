@@ -10,6 +10,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
+local OpenArenaCornerReservationService = require(ServerScriptService.Services:WaitForChild("OpenArenaCornerReservationService"))
 
 local LOBBY_PLACE_ID = 108248113575262
 local TELEPORT_DELAY_SECONDS = 2
@@ -33,6 +34,9 @@ local defeatedRemote = defeatedRemoteInst :: RemoteEvent
 
 local defeatedByUserId: { [number]: boolean } = {}
 local matchEnded = false
+
+local TERRITORY_VALUE_NAME = "Territory%"
+local OPEN_ARENA_WIN_TERRITORY_PCT = 70
 
 local function getAliveOwnerUserIds(): { [number]: boolean }
 	local alive: { [number]: boolean } = {}
@@ -93,6 +97,128 @@ local function markAndHandleDefeat(player: Player)
 	end)
 end
 
+local function isOpenArenaMode(): boolean
+	return OpenArenaCornerReservationService.IsActive()
+end
+
+local function teleportWinnerToLobbyAfterDelay(winner: Player)
+	task.delay(VICTORY_TELEPORT_DELAY_SECONDS, function()
+		if not winner.Parent then
+			return
+		end
+		local ok, err = pcall(function()
+			TeleportService:Teleport(LOBBY_PLACE_ID, winner)
+		end)
+		if not ok then
+			warn("[CastleDefeatHandler] Victory teleport failed:", err)
+		end
+	end)
+end
+
+local function endMatchWithWinner(winner: Player, reason: string)
+	if matchEnded then
+		return
+	end
+	if not winner or not winner:IsA("Player") then
+		return
+	end
+	if winner:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+		return
+	end
+
+	matchEnded = true
+	winner:SetAttribute(PLAYER_VICTORY_ATTR, true)
+	defeatedRemote:FireClient(winner, "Victory!")
+	teleportWinnerToLobbyAfterDelay(winner)
+
+	-- Everyone else loses and returns to lobby.
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= winner and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
+			markAndHandleDefeat(p)
+		end
+	end
+
+	print(string.format(
+		"[CastleDefeatHandler] Match ended. Winner=%s reason=%s openArena=%s",
+		winner.Name,
+		tostring(reason),
+		tostring(isOpenArenaMode())
+	))
+end
+
+local function getTerritoryPct(player: Player): number
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return 0
+	end
+	local v = leaderstats:FindFirstChild(TERRITORY_VALUE_NAME)
+	if v and v:IsA("IntValue") then
+		return (v :: IntValue).Value
+	end
+	return 0
+end
+
+local territoryWatcherByUserId: { [number]: boolean } = {}
+local function attachTerritoryWatcher(player: Player)
+	if territoryWatcherByUserId[player.UserId] then
+		return
+	end
+	territoryWatcherByUserId[player.UserId] = true
+
+	task.spawn(function()
+		local leaderstats = player:WaitForChild("leaderstats", 10)
+		if not leaderstats then
+			return
+		end
+		if not leaderstats:IsA("Folder") then
+			return
+		end
+
+		local function maybeCheckAndWin()
+			if matchEnded then
+				return
+			end
+			if not isOpenArenaMode() then
+				return
+			end
+			if player.Parent == nil then
+				return
+			end
+			if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+				return
+			end
+			local pct = getTerritoryPct(player)
+			if type(pct) == "number" and pct >= OPEN_ARENA_WIN_TERRITORY_PCT then
+				endMatchWithWinner(player, "territory_70")
+			end
+		end
+
+		local function onChild(child: Instance)
+			if child.Name ~= TERRITORY_VALUE_NAME then
+				return
+			end
+			if not child:IsA("IntValue") then
+				return
+			end
+			(child :: IntValue).Changed:Connect(function()
+				maybeCheckAndWin()
+			end)
+			maybeCheckAndWin()
+		end
+
+		for _, child in ipairs(leaderstats:GetChildren()) do
+			onChild(child)
+		end
+		leaderstats.ChildAdded:Connect(onChild)
+		maybeCheckAndWin()
+	end)
+end
+
+Players.PlayerAdded:Connect(attachTerritoryWatcher)
+for _, p in ipairs(Players:GetPlayers()) do
+	attachTerritoryWatcher(p)
+end
+
 CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: number, _teamId: number)
 	if type(ownerUserId) ~= "number" or ownerUserId <= 0 then
 		return
@@ -117,6 +243,11 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 	end
 
 	if aliveCount == 1 then
+		if isOpenArenaMode() then
+			-- In OpenArena, destroying enemy castles never grants victory.
+			return
+		end
+
 		local winnerUserId = getOnlyAliveOwnerUserId(alive)
 		if winnerUserId <= 0 then
 			return
@@ -129,21 +260,7 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 			return
 		end
 
-		matchEnded = true
-		winner:SetAttribute(PLAYER_VICTORY_ATTR, true)
-		defeatedRemote:FireClient(winner, "Victory!")
-
-		task.delay(VICTORY_TELEPORT_DELAY_SECONDS, function()
-			if not winner.Parent then
-				return
-			end
-			local ok, err = pcall(function()
-				TeleportService:Teleport(LOBBY_PLACE_ID, winner)
-			end)
-			if not ok then
-				warn("[CastleDefeatHandler] Victory teleport failed:", err)
-			end
-		end)
+		endMatchWithWinner(winner, "last_castle")
 		return
 	end
 
@@ -159,4 +276,5 @@ end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	defeatedByUserId[player.UserId] = nil
+	territoryWatcherByUserId[player.UserId] = nil
 end)
