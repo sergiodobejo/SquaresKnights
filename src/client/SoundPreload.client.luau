@@ -54,6 +54,10 @@ end
 local CASTLE_DESTROYED_SFX_ID = "rbxassetid://83808819886243"
 local CAPTURE_SUCCESS_SFX_ID = "rbxassetid://104267438913431"
 
+-- Match end UI sounds (DefeatOverlay).
+local LOSE_MATCH_SFX_ID = "rbxassetid://75759245900834"
+local WIN_MATCH_SFX_ID = "rbxassetid://120357227206365"
+
 -- Shop UI sounds (same IDs as in Shop GUI script).
 local NOT_ENOUGH_MONEY_SOUND_ID = "rbxassetid://71887292352019"
 
@@ -86,7 +90,12 @@ do
 	end
 end
 
-for _, id in ipairs({ CASTLE_DESTROYED_SFX_ID, NOT_ENOUGH_MONEY_SOUND_ID }) do
+for _, id in ipairs({
+	CASTLE_DESTROYED_SFX_ID,
+	NOT_ENOUGH_MONEY_SOUND_ID,
+	LOSE_MATCH_SFX_ID,
+	WIN_MATCH_SFX_ID,
+}) do
 	local n = normalizeSoundId(id)
 	if n then
 		table.insert(all, n)

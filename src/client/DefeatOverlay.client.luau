@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -11,9 +12,14 @@ local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local defeatedRemote = remotesFolder:WaitForChild(RemoteNames.PlayerDefeated) :: RemoteEvent
 
+local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
+
 local GUI_NAME = "DefeatOverlay"
 local DEFAULT_TEXT = "You have been defeated."
 local DEFAULT_MAX_TEXT_SIZE = 140
+
+local LOSE_SFX_ID = "rbxassetid://75759245900834"
+local WIN_SFX_ID = "rbxassetid://120357227206365"
 
 local hideToken = 0
 
@@ -55,6 +61,17 @@ end
 
 local function show(message: string?, durationSeconds: number?)
 	local gui = ensureGui()
+
+	local isVictory = false
+	if type(message) == "string" then
+		local lower = string.lower(message)
+		isVictory = lower:find("victory", 1, true) ~= nil
+	end
+	SoundCache.Play(if isVictory then WIN_SFX_ID else LOSE_SFX_ID, {
+		parent = SoundService,
+		poolSize = 1,
+	})
+
 	local label = gui:FindFirstChild("Label")
 	if label and label:IsA("TextLabel") then
 		(label :: TextLabel).Text = if type(message) == "string" and message ~= "" then message else DEFAULT_TEXT
