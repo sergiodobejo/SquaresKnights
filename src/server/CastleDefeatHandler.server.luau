@@ -13,6 +13,7 @@ local CastleHealthService = require(ServerScriptService.Services:WaitForChild("C
 local OpenArenaCornerReservationService = require(ServerScriptService.Services:WaitForChild("OpenArenaCornerReservationService"))
 
 local LOBBY_PLACE_ID = 108248113575262
+local PRE_RESULT_DELAY_SECONDS = 3
 local TELEPORT_DELAY_SECONDS = 2
 local VICTORY_TELEPORT_DELAY_SECONDS = 5
 local PLAYER_DEFEATED_ATTR = "Defeated"
@@ -80,20 +81,32 @@ local function markAndHandleDefeat(player: Player)
 		return
 	end
 	defeatedByUserId[player.UserId] = true
-	player:SetAttribute(PLAYER_DEFEATED_ATTR, true)
 
-	defeatedRemote:FireClient(player, "You have been defeated.")
-
-	task.delay(TELEPORT_DELAY_SECONDS, function()
+	task.delay(PRE_RESULT_DELAY_SECONDS, function()
 		if not player.Parent then
 			return
 		end
-		local ok, err = pcall(function()
-			TeleportService:Teleport(LOBBY_PLACE_ID, player)
-		end)
-		if not ok then
-			warn("[CastleDefeatHandler] Teleport failed:", err)
+		if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+			return
 		end
+		if player:GetAttribute(PLAYER_VICTORY_ATTR) == true then
+			return
+		end
+
+		player:SetAttribute(PLAYER_DEFEATED_ATTR, true)
+		defeatedRemote:FireClient(player, "You have been defeated.")
+
+		task.delay(TELEPORT_DELAY_SECONDS, function()
+			if not player.Parent then
+				return
+			end
+			local ok, err = pcall(function()
+				TeleportService:Teleport(LOBBY_PLACE_ID, player)
+			end)
+			if not ok then
+				warn("[CastleDefeatHandler] Teleport failed:", err)
+			end
+		end)
 	end)
 end
 
@@ -122,14 +135,23 @@ local function endMatchWithWinner(winner: Player, reason: string)
 	if not winner or not winner:IsA("Player") then
 		return
 	end
-	if winner:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+	if winner:GetAttribute(PLAYER_DEFEATED_ATTR) == true or defeatedByUserId[winner.UserId] then
 		return
 	end
 
 	matchEnded = true
-	winner:SetAttribute(PLAYER_VICTORY_ATTR, true)
-	defeatedRemote:FireClient(winner, "Victory!")
-	teleportWinnerToLobbyAfterDelay(winner)
+
+	task.delay(PRE_RESULT_DELAY_SECONDS, function()
+		if not winner.Parent then
+			return
+		end
+		if winner:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+			return
+		end
+		winner:SetAttribute(PLAYER_VICTORY_ATTR, true)
+		defeatedRemote:FireClient(winner, "Victory!")
+		teleportWinnerToLobbyAfterDelay(winner)
+	end)
 
 	-- Everyone else loses and returns to lobby.
 	for _, p in ipairs(Players:GetPlayers()) do
@@ -227,7 +249,7 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 	if not player then
 		return
 	end
-	if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true then
+	if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true or defeatedByUserId[player.UserId] then
 		return
 	end
 	markAndHandleDefeat(player)
