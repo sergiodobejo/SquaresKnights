@@ -5,6 +5,8 @@ local PhysicsService = game:GetService("PhysicsService")
 local GROUP_NPC = "NPC"
 local GROUP_PLAYERS = "Players"
 
+local NPC_MESH_COLLIDE_AFTER_SPAWN_SECONDS = 10
+
 local inited = false
 
 local function registerGroup(groupName: string)
@@ -49,29 +51,33 @@ local function setCollisionGroup(part: BasePart, groupName: string)
 	end)
 end
 
-local function setWorldColliderForNpc(npc: Model)
+local function getWorldColliderPartForNpc(npc: Model): BasePart?
 	local hrp = npc:FindFirstChild("HumanoidRootPart")
 	if hrp and hrp:IsA("BasePart") then
-		pcall(function()
-			(hrp :: BasePart).CanCollide = true
-		end)
-		return
+		return hrp
 	end
 
 	local ground = npc:FindFirstChild("GroundCollider")
 	if ground and ground:IsA("BasePart") then
-		pcall(function()
-			(ground :: BasePart).CanCollide = true
-		end)
-		return
+		return ground
 	end
 
 	local anyPart = npc:FindFirstChildWhichIsA("BasePart", true)
 	if anyPart then
+		return anyPart
+	end
+
+	return nil
+end
+
+local function setWorldColliderForNpc(npc: Model): BasePart?
+	local part = getWorldColliderPartForNpc(npc)
+	if part then
 		pcall(function()
-			(anyPart :: BasePart).CanCollide = true
+			part.CanCollide = true
 		end)
 	end
+	return part
 end
 
 local Shared = {}
@@ -87,12 +93,74 @@ end
 
 function Shared.ApplyNpc(npc: Model)
 	initOnce()
+
+	local worldColliderPart = setWorldColliderForNpc(npc)
+
+	local meshCollisionEnabled = true
+	local descendantConn: RBXScriptConnection? = nil
+
+	local function applyPart(part: BasePart)
+		setCollisionGroup(part, GROUP_NPC)
+		-- Never touch the intended root/world collider parts.
+		if part.Name == "HumanoidRootPart" or part.Name == "GroundCollider" then
+			return
+		end
+		if worldColliderPart and part == worldColliderPart then
+			return
+		end
+		pcall(function()
+			part.CanCollide = meshCollisionEnabled
+		end)
+	end
+
 	for _, inst in ipairs(npc:GetDescendants()) do
 		if inst:IsA("BasePart") then
-			setCollisionGroup(inst, GROUP_NPC)
+			applyPart(inst)
 		end
 	end
-	setWorldColliderForNpc(npc)
+
+	-- Keep newly added parts consistent (accessories, etc.).
+	descendantConn = npc.DescendantAdded:Connect(function(inst)
+		if inst:IsA("BasePart") then
+			applyPart(inst)
+		end
+	end)
+
+	-- Cleanup connection when NPC is removed.
+	npc.AncestryChanged:Connect(function(_, parent)
+		if parent ~= nil then
+			return
+		end
+		if descendantConn then
+			descendantConn:Disconnect()
+			descendantConn = nil
+		end
+	end)
+
+	-- After a short spawn window, disable mesh collisions again.
+	task.delay(NPC_MESH_COLLIDE_AFTER_SPAWN_SECONDS, function()
+		meshCollisionEnabled = false
+		if npc.Parent == nil then
+			return
+		end
+		local currentWorldColliderPart = getWorldColliderPartForNpc(npc)
+		for _, inst in ipairs(npc:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				if inst.Name == "HumanoidRootPart" or inst.Name == "GroundCollider" then
+					continue
+				end
+				if worldColliderPart and inst == worldColliderPart then
+					continue
+				end
+				if currentWorldColliderPart and inst == currentWorldColliderPart then
+					continue
+				end
+				pcall(function()
+					(inst :: BasePart).CanCollide = false
+				end)
+			end
+		end
+	end)
 end
 
 function Shared.ApplyPlayerCharacter(character: Model)
