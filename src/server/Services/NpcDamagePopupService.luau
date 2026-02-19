@@ -21,6 +21,7 @@ local npcDamagePopupRemote = npcDamagePopupRemoteInst :: RemoteEvent
 
 local lastHealthByNpc: { [Model]: number } = (setmetatable({}, { __mode = "k" }) :: any)
 local connByNpc: { [Model]: RBXScriptConnection } = (setmetatable({}, { __mode = "k" }) :: any)
+local ignoreDamageUntilByNpc: { [Model]: number } = (setmetatable({}, { __mode = "k" }) :: any)
 
 local HRP_NO_COLLISION_AFTER_SECONDS = 5
 local NPC_CELL_KEY_ATTRIBUTE = "CellKey"
@@ -77,6 +78,10 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 	end
 
 	lastHealthByNpc[npc] = humanoid.Health
+	-- Humanoid health may briefly fluctuate during spawn/initialization (rig load,
+	-- MaxHealth clamps, etc.). Ignore damage popups for a short window, but still
+	-- keep lastHealth updated so we start from a stable baseline.
+	ignoreDamageUntilByNpc[npc] = os.clock() + 0.45
 
 	-- After a short lifetime, disable collisions on HRP to reduce crowd jamming.
 	-- Applies to both team NPCs and AI NPCs (anything we track here).
@@ -97,6 +102,11 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 	connByNpc[npc] = humanoid.HealthChanged:Connect(function(health: number)
 		local last = lastHealthByNpc[npc]
 		lastHealthByNpc[npc] = health
+
+		local ignoreUntil = ignoreDamageUntilByNpc[npc]
+		if typeof(ignoreUntil) == "number" and os.clock() < ignoreUntil then
+			return
+		end
 
 		if typeof(last) ~= "number" then
 			return
@@ -126,6 +136,7 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 			conn:Disconnect()
 		end
 		lastHealthByNpc[npc] = nil
+		ignoreDamageUntilByNpc[npc] = nil
 	end)
 end
 

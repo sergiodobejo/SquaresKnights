@@ -12,6 +12,15 @@ Shared.Attributes = {
 
 local RESERVED_FOR_AI_COLOR = "blue"
 
+-- Some color pairs are too visually similar and should never appear together
+-- in the same server/map.
+local MUTUALLY_EXCLUSIVE: { [string]: { [string]: boolean } } = {
+	brown = { tan = true },
+	tan = { brown = true },
+	pink = { purple = true },
+	purple = { pink = true },
+}
+
 local function isPlayerAssignableColor(colorName: any): boolean
 	return type(colorName) == "string" and colorName ~= "" and colorName:lower() ~= RESERVED_FOR_AI_COLOR
 end
@@ -67,11 +76,67 @@ local reservedColorNames: { [string]: boolean } = {}
 
 local rng = Random.new()
 
-local function removeFromAvailable(colorName: string)
+local function removeFromAvailable(colorName: string): boolean
 	local idx = table.find(availableColors, colorName)
 	if idx ~= nil then
 		table.remove(availableColors, idx)
+		return true
 	end
+	return false
+end
+
+local function getActiveColorSet(): { [string]: boolean }
+	local active: { [string]: boolean } = {}
+	for _, colorName in pairs(assignedByUserId) do
+		if type(colorName) == "string" and colorName ~= "" then
+			active[colorName:lower()] = true
+		end
+	end
+	for colorName, isReserved in pairs(reservedColorNames) do
+		if isReserved then
+			active[tostring(colorName):lower()] = true
+		end
+	end
+	return active
+end
+
+local function conflictsWithActive(candidateColorName: string, active: { [string]: boolean }): boolean
+	local cand = candidateColorName:lower()
+	local exclusions = MUTUALLY_EXCLUSIVE[cand]
+	if not exclusions then
+		return false
+	end
+	for other in pairs(exclusions) do
+		if active[other] then
+			return true
+		end
+	end
+	return false
+end
+
+local function takeRandomNonConflictingAvailableColor(): string?
+	if #availableColors <= 0 then
+		return nil
+	end
+
+	local active = getActiveColorSet()
+	local candidates: { string } = {}
+	for _, name in ipairs(availableColors) do
+		if isPlayerAssignableColor(name) and not conflictsWithActive(name, active) then
+			table.insert(candidates, name)
+		end
+	end
+
+	if #candidates <= 0 then
+		return nil
+	end
+
+	local chosen = candidates[rng:NextInteger(1, #candidates)]
+	if not removeFromAvailable(chosen) then
+		-- Safety: in case of inconsistent casing.
+		removeFromAvailable(chosen:lower())
+	end
+	return chosen
 end
 
 local function stampPlayerAttributes(player: Player, colorName: string)
@@ -132,24 +197,35 @@ end
 -- Takes and returns a random available player-assignable color name.
 -- If none are available, falls back to a random valid color.
 function Shared.TakeRandomAvailablePlayerColorName(): string
-	local chosen: string
-	if #availableColors > 0 then
-		local idx = rng:NextInteger(1, #availableColors)
-		chosen = table.remove(availableColors, idx) :: string
-	else
-		local fallback: { string } = {}
-		for _, name in ipairs(ALL_COLORS) do
-			if isPlayerAssignableColor(name) then
-				table.insert(fallback, name)
-			end
-		end
-		if #fallback > 0 then
-			chosen = fallback[rng:NextInteger(1, #fallback)]
-		else
-			chosen = "red"
+	local chosen = takeRandomNonConflictingAvailableColor()
+	if chosen then
+		return chosen
+	end
+
+	-- Fallback: if the pool is empty or all remaining colors would conflict, pick a
+	-- random valid color that does not conflict with already active colors.
+	local active = getActiveColorSet()
+	local fallback: { string } = {}
+	for _, name in ipairs(ALL_COLORS) do
+		if isPlayerAssignableColor(name) and not conflictsWithActive(name, active) then
+			table.insert(fallback, name)
 		end
 	end
-	return chosen
+	if #fallback > 0 then
+		return fallback[rng:NextInteger(1, #fallback)]
+	end
+
+	-- Last resort: preserve previous behavior.
+	local anyValid: { string } = {}
+	for _, name in ipairs(ALL_COLORS) do
+		if isPlayerAssignableColor(name) then
+			table.insert(anyValid, name)
+		end
+	end
+	if #anyValid > 0 then
+		return anyValid[rng:NextInteger(1, #anyValid)]
+	end
+	return "red"
 end
 
 local function assignColorInternal(player: Player): string
@@ -158,15 +234,13 @@ local function assignColorInternal(player: Player): string
 		return existing
 	end
 
-	local chosen: string
-	if #availableColors > 0 then
-		local idx = rng:NextInteger(1, #availableColors)
-		chosen = table.remove(availableColors, idx) :: string
-	else
-		-- Should not happen in your constraints (players <= colors).
+	local chosen = takeRandomNonConflictingAvailableColor()
+	if not chosen then
+		-- Should not happen in typical constraints (players <= colors), but keep a safe fallback.
+		local active = getActiveColorSet()
 		local fallback: { string } = {}
 		for _, name in ipairs(ALL_COLORS) do
-			if isPlayerAssignableColor(name) then
+			if isPlayerAssignableColor(name) and not conflictsWithActive(name, active) then
 				table.insert(fallback, name)
 			end
 		end
