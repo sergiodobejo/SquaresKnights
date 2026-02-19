@@ -6,6 +6,7 @@ local SoundService = game:GetService("SoundService")
 
 local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
 local AttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("AttackSounds"))
+local NpcSpawnSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("NpcSpawnSounds"))
 
 local function normalizeSoundId(id: any): string?
 	if type(id) ~= "string" then
@@ -54,13 +55,25 @@ local CAPTURE_SUCCESS_SFX_ID = "rbxassetid://104267438913431"
 
 -- Shop UI sounds (same IDs as in Shop GUI script).
 local NOT_ENOUGH_MONEY_SOUND_ID = "rbxassetid://71887292352019"
-local SHOP_SUCCESS_SOUND_ID = "rbxassetid://117006835091805"
 
 local all: { string } = {}
 for _, id in ipairs(collectAttackSoundIds()) do
 	table.insert(all, id)
 end
-for _, id in ipairs({ CASTLE_DESTROYED_SFX_ID, NOT_ENOUGH_MONEY_SOUND_ID, SHOP_SUCCESS_SOUND_ID }) do
+
+do
+	local list = (NpcSpawnSounds :: any).CollectAllSoundIds and (NpcSpawnSounds :: any).CollectAllSoundIds()
+	if type(list) == "table" then
+		for _, id in ipairs(list) do
+			local n = normalizeSoundId(id)
+			if n then
+				table.insert(all, n)
+			end
+		end
+	end
+end
+
+for _, id in ipairs({ CASTLE_DESTROYED_SFX_ID, NOT_ENOUGH_MONEY_SOUND_ID }) do
 	local n = normalizeSoundId(id)
 	if n then
 		table.insert(all, n)

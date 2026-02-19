@@ -34,7 +34,6 @@ local Shared = {}
 local started = false
 
 local NOT_ENOUGH_MONEY_SOUND_ID = "rbxassetid://71887292352019"
-local SHOP_SUCCESS_CLOSE_SOUND_ID = "rbxassetid://117006835091805"
 
 local pendingPurchaseItemName: string? = nil
 local pendingPurchaseExpiresAt = 0
@@ -479,7 +478,7 @@ function Shared.OnStart()
 
 	-- Preload UI sounds to avoid first-play latency.
 	task.defer(function()
-		SoundCache.Preload({ NOT_ENOUGH_MONEY_SOUND_ID, SHOP_SUCCESS_CLOSE_SOUND_ID }, {
+		SoundCache.Preload({ NOT_ENOUGH_MONEY_SOUND_ID }, {
 			parent = SoundService,
 			poolSize = 2,
 		})
@@ -700,7 +699,6 @@ function Local.GenerateBuffButtons()
 				end
 
 				beginPendingCloseOnSpawn(name, 10)
-				playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
 				BuyItemRemote:FireServer(name)
 			end)
 		end
@@ -716,7 +714,6 @@ function Local.GenerateBuffButtons()
 							return
 						end
 						beginPendingCloseOnSpawn(name, 90)
-						playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
 						PromptDevProductRemote:FireServer(devProductId)
 					end)
 				end
@@ -729,7 +726,6 @@ function Local.GenerateBuffButtons()
 							return
 						end
 						beginPendingCloseOnSpawn(name, 90)
-						playOneShotSound(SHOP_SUCCESS_CLOSE_SOUND_ID)
 						PromptDevProductRemote:FireServer(devProductId)
 					end)
 				end
