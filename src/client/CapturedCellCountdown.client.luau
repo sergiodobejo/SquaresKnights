@@ -1,5 +1,5 @@
 -- StarterPlayer.StarterPlayerScripts.CapturedCellCountdown
--- Shows a 5-second countdown number above temporarily-captured cells.
+-- Shows a countdown number above temporarily-captured cells.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,12 +8,13 @@ local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 
 local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 -- Camera focus on newly-captured regions (owned by this player).
 local CAMERA_OUT_SECONDS = 0.45
-local CAMERA_HOLD_SECONDS = 0.75
+local CAMERA_HOLD_SECONDS = RuntimeSettings.CaptureCinematicCameraHoldSeconds
 local CAMERA_BACK_SECONDS = 0.45
 local CAMERA_COOLDOWN_SECONDS = 2.5
 local CAMERA_MARGIN_CELLS = 1

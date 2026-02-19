@@ -6,6 +6,7 @@ local SoundService = game:GetService("SoundService")
 
 local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
 local AttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("AttackSounds"))
+local CastleUnderAttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CastleUnderAttackSounds"))
 local NpcSpawnSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("NpcSpawnSounds"))
 
 local function normalizeSoundId(id: any): string?
@@ -59,6 +60,18 @@ local NOT_ENOUGH_MONEY_SOUND_ID = "rbxassetid://71887292352019"
 local all: { string } = {}
 for _, id in ipairs(collectAttackSoundIds()) do
 	table.insert(all, id)
+end
+
+do
+	local list = (CastleUnderAttackSounds :: any).CollectAllSoundIds and (CastleUnderAttackSounds :: any).CollectAllSoundIds()
+	if type(list) == "table" then
+		for _, id in ipairs(list) do
+			local n = normalizeSoundId(id)
+			if n then
+				table.insert(all, n)
+			end
+		end
+	end
 end
 
 do

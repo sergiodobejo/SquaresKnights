@@ -12,6 +12,7 @@ local ShopConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChil
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local TeamColorService = require(ServerScriptService.Services:WaitForChild("TeamColorService"))
 local NpcSpawnService = require(ServerScriptService.Services:WaitForChild("NpcSpawnService"))
+local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 
 local OCCUPANCY_FOLDER_NAME = "CellOccupancy"
 local OVERLAY_FOLDER_NAME = "CellOverlays"
@@ -19,7 +20,7 @@ local RESERVED_OVERLAY_FOLDER_NAME = "ReservedCellOverlays"
 local CAPTURED_BLOCKS_FOLDER_NAME = "CapturedCellBlocks"
 
 -- Duration for temporary capture highlight + block.
-local CAPTURE_HIGHLIGHT_SECONDS = 5
+local CAPTURE_HIGHLIGHT_SECONDS = (RuntimeSettings :: any).CaptureHighlightSeconds or 5
 
 local CAPTURE_SPAWN_ITEM_KEY = "Priest"
 local CAPTURE_SPAWN_HEIGHT_ABOVE_SURFACE = 4.2

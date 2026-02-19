@@ -4,6 +4,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TeamColors = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamColors"))
+local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
+local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
+local CastleUnderAttackSounds = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CastleUnderAttackSounds"))
 
 local TEAM_COLOR_ATTRIBUTE = "TeamColor"
 
@@ -167,18 +170,22 @@ local function main()
 		end
 		local buttonTextColor = Color3.new(1, 1, 1)
 		local buttonStrokeColor = Color3.new(0, 0, 0)
-		local button = createButton(top, teamColor3, buttonTextColor, buttonStrokeColor)
+		if (RuntimeSettings :: any).EnableToYourCastleButton == true then
+			local createdButton = createButton(top, teamColor3, buttonTextColor, buttonStrokeColor)
+			createdButton.Activated:Connect(function()
+				teleportRemote:FireServer()
+			end)
+		end
 		local underAttack = createUnderAttackLabel(top)
-		button.Activated:Connect(function()
-			teleportRemote:FireServer()
-		end)
 
 		local SHOW_SECONDS = 5
 		local BREAK_SECONDS = 5
 		local CONTINUE_GRACE_SECONDS = 6
 		local BLINK_PERIOD_SECONDS = 0.35
+		local SOUND_PERIOD_SECONDS = (SHOW_SECONDS + BREAK_SECONDS) * 2
 
 		local lastShownAt = 0
+		local lastSoundAt = -1e9
 		local loopRunning = false
 
 		local function getLastDamageTime(castle: Model): number
@@ -216,6 +223,13 @@ local function main()
 					local now = workspace:GetServerTimeNow()
 					if now - lastShownAt >= (SHOW_SECONDS + BREAK_SECONDS) then
 						lastShownAt = now
+						if now - lastSoundAt >= SOUND_PERIOD_SECONDS then
+							lastSoundAt = now
+							local soundId = (CastleUnderAttackSounds :: any).ResolveRandom and (CastleUnderAttackSounds :: any).ResolveRandom()
+							if type(soundId) == "string" and soundId ~= "" then
+								SoundCache.Play(soundId, { poolSize = 2 })
+							end
+						end
 							underAttack.Visible = true
 							local endAt = os.clock() + SHOW_SECONDS
 							while os.clock() < endAt do

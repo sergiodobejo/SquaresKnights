@@ -1,9 +1,13 @@
 -- ReplicatedStorage.Configs.AiNpcConfig
 -- Configuration for spawning and behavior of AI NPCs (neutral units spawning in the center).
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
+
 local Config = {
 	-- Spawn one AI NPC every N seconds
-	SpawnIntervalSeconds = 5,
+	SpawnIntervalSeconds = RuntimeSettings.AiNpcSpawnIntervalSeconds,
 	
 	-- List of all available NPC model names that AI can spawn
 	AvailableNpcModels = {
@@ -31,3 +35,4 @@ local Config = {
 }
 
 return Config
+

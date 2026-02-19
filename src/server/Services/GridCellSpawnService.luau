@@ -119,36 +119,36 @@ end
 local Shared = {}
 
 -- Returns (success, reason)
-function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (boolean, string?)
+function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (boolean, string?, string?, string?)
 	if typeof(itemName) ~= "string" or itemName == "" then
-		return false, "invalid_item"
+		return false, "invalid_item", nil, nil
 	end
 
 	local cfg = ShopConfig.GetConfig(itemName)
 	if not cfg or (cfg :: any).Enabled == false then
-		return false, "invalid_config"
+		return false, "invalid_config", nil, nil
 	end
 	if cfg.ItemKind ~= "npc" then
-		return false, "unsupported_kind"
+		return false, "unsupported_kind", nil, nil
 	end
 
 	local baseplate = GridCells.FindBaseplate()
 	if not baseplate then
-		return false, "no_baseplate"
+		return false, "no_baseplate", nil, nil
 	end
 
 	local character = player.Character
 	if not character then
-		return false, "no_character"
+		return false, "no_character", nil, nil
 	end
 	local root = getCharacterRoot(character)
 	if not root then
-		return false, "no_root"
+		return false, "no_root", nil, nil
 	end
 
 	local ix, iz = GridCells.GetCellIndexFromWorld(baseplate, root.Position)
 	if ix == nil or iz == nil then
-		return false, "not_on_grid"
+		return false, "not_on_grid", nil, nil
 	end
 
 	local cellKey = GridCells.GetCellKey(ix, iz)
@@ -158,7 +158,7 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 	end
 
 	if not GridCellOccupancyService.TryReserveCellKey(cellKey, teamColorName) then
-		return false, "cell_occupied"
+		return false, "cell_occupied", cellKey, nil
 	end
 
 	-- Predict which regions will become captured once this reserved cell becomes an occupied wall.
@@ -174,8 +174,9 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 	local freeIx, freeIz = findNearestFreeCell(baseplate, ix, iz, cellKey, disallowedKeys)
 	if freeIx == nil or freeIz == nil then
 		GridCellOccupancyService.CancelReservation(cellKey)
-		return false, "no_free_cell"
+		return false, "no_free_cell", cellKey, nil
 	end
+	local freeCellKey = GridCells.GetCellKey(freeIx, freeIz)
 
 	-- Move player first so the NPC spawns cleanly.
 	do
@@ -203,7 +204,7 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 
 	if not npc then
 		GridCellOccupancyService.CancelReservation(cellKey)
-		return false, "spawn_failed"
+		return false, "spawn_failed", cellKey, freeCellKey
 	end
 
 	-- We'll apply the predicted captures ourselves (no extra flood-fill pass), so skip the default check.
@@ -217,7 +218,7 @@ function Shared.TrySpawnShopItemOnCurrentCell(player: Player, itemName: any): (b
 		teamColorName = actualColorName
 	end
 	GridCellOccupancyService.ApplyCaptureRegionsForTeam(baseplate, player.UserId, teamColorName, predictedRegions)
-	return true, nil
+	return true, nil, cellKey, freeCellKey
 end
 
 return Shared

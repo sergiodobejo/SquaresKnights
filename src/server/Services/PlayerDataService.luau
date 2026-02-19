@@ -4,15 +4,23 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BuffStateService = require(ServerScriptService.Services.BuffStateService)
 local BuffEffectService = require(ServerScriptService.Services.BuffEffectService)
+local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 
 local PlayerDataService = {}
 
 local STORE = DataStoreService:GetDataStore("PlayerDataV1")
 
-local DEFAULT_COINS = 10
+local function getStartingCoins(): number
+	local v = (RuntimeSettings :: any).StartingCoins
+	if type(v) == "number" then
+		return math.max(0, math.floor(v))
+	end
+	return 10
+end
 
 export type PlayerState = {
 	buffs: any,
@@ -54,11 +62,13 @@ end
 local function load(player: Player)
 	local userId = player.UserId
 	local data
-	local ok, err = pcall(function()
-		data = STORE:GetAsync(keyFor(userId))
-	end)
-	if not ok then
-		warn("[PlayerDataService] GetAsync failed (enable Studio API Services for DataStore):", err)
+	if (RuntimeSettings :: any).EnableDataStore == true then
+		local ok, err = pcall(function()
+			data = STORE:GetAsync(keyFor(userId))
+		end)
+		if not ok then
+			warn("[PlayerDataService] GetAsync failed (enable Studio API Services for DataStore):", err)
+		end
 	end
 
 	if type(data) ~= "table" then
@@ -82,7 +92,7 @@ local function load(player: Player)
 	StateByUserId[userId] = data
 
 	local coinsValue = ensureLeaderstats(player)
-	coinsValue.Value = DEFAULT_COINS
+	coinsValue.Value = getStartingCoins()
 
 	BuffStateService.LoadFromState(player, data.buffs)
 
@@ -108,6 +118,9 @@ local function save(player: Player)
 	local userId = player.UserId
 	local state = StateByUserId[userId]
 	if not state then
+		return
+	end
+	if (RuntimeSettings :: any).EnableDataStore ~= true then
 		return
 	end
 
