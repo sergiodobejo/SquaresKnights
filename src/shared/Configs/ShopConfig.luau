@@ -211,12 +211,14 @@ local Shared = {}
 Shared.Config = Config
 
 local PRICE_BY_NPC_MODEL_NAME: { [string]: number } = {}
+local PRICE_BY_NPC_MODEL_NAME_LOWER: { [string]: number } = {}
 for _, itemConfig in pairs(Config.Items) do
 	if type(itemConfig) == "table" then
 		local npcModelName = itemConfig.NpcModelName
 		local price = itemConfig.Price
 		if type(npcModelName) == "string" and npcModelName ~= "" and type(price) == "number" then
 			PRICE_BY_NPC_MODEL_NAME[npcModelName] = price
+			PRICE_BY_NPC_MODEL_NAME_LOWER[npcModelName:lower()] = price
 		end
 	end
 end
@@ -225,7 +227,11 @@ function Shared.GetPriceForNpcModelName(npcModelName: any): number?
 	if type(npcModelName) ~= "string" or npcModelName == "" then
 		return nil
 	end
-	return PRICE_BY_NPC_MODEL_NAME[npcModelName]
+	local direct = PRICE_BY_NPC_MODEL_NAME[npcModelName]
+	if type(direct) == "number" then
+		return direct
+	end
+	return PRICE_BY_NPC_MODEL_NAME_LOWER[npcModelName:lower()]
 end
 
 function Shared.GetConfig(package: string)

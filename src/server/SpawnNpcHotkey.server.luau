@@ -8,6 +8,7 @@ local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
 
 local NpcDamagePopupService = require(ServerScriptService.Services:WaitForChild("NpcDamagePopupService"))
+local WarriorValueService = require(ServerScriptService.Services:WaitForChild("WarriorValueService"))
 
 local TEAM_COLOR_ATTRIBUTE = "TeamColor"
 
@@ -197,6 +198,7 @@ local function spawnRandomNpcNearPlayer(player: Player)
 	local liveNpcFolder = getOrCreateFolder(workspace, "LiveNPC")
 	clone.Parent = liveNpcFolder
 	NpcDamagePopupService.TrackNpc(clone)
+	WarriorValueService.MaybeTrackNpc(clone)
 
 	local hrp = clone:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if hrp and hrp:IsA("BasePart") then

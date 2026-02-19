@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local PlayerDataService = require(ServerScriptService.Services.PlayerDataService)
 local GridCellSpawnService = require(ServerScriptService.Services.GridCellSpawnService)
+local WarriorValueService = require(ServerScriptService.Services.WarriorValueService)
 
 local RemotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local BuyItemRemote = RemotesFolder:WaitForChild("BuyItem")
@@ -55,7 +56,7 @@ BuyItemRemote.OnServerEvent:Connect(function(player, itemName)
 
 		-- Deduct first, then refund if spawn fails.
 		PlayerDataService.AddCoins(player, -priceCoins)
-		local ok, reason = GridCellSpawnService.TrySpawnShopItemOnCurrentCell(player, itemName)
+		local ok, reason, _, _, spawnedNpc = GridCellSpawnService.TrySpawnShopItemOnCurrentCell(player, itemName)
 		if not ok then
 			PlayerDataService.AddCoins(player, priceCoins)
 			warn(string.format(
@@ -65,6 +66,10 @@ BuyItemRemote.OnServerEvent:Connect(function(player, itemName)
 				tostring(reason)
 			))
 			return
+		end
+
+		if spawnedNpc then
+			WarriorValueService.RegisterPurchasedNpc(player, spawnedNpc, priceCoins)
 		end
 
 		local afterCoins = PlayerDataService.GetCoins(player)

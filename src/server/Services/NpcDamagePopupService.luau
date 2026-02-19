@@ -1,9 +1,12 @@
 -- ServerScriptService.Services.NpcDamagePopupService
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+
+local CollisionGroupsService = require(ServerScriptService.Services:WaitForChild("CollisionGroupsService"))
 
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 10)
 if not remotesFolder then
@@ -83,6 +86,9 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 	-- keep lastHealth updated so we start from a stable baseline.
 	ignoreDamageUntilByNpc[npc] = os.clock() + 0.45
 
+	-- Ensure NPCs collide with the world but not with NPCs/players.
+	CollisionGroupsService.ApplyNpc(npc)
+
 	-- After a short lifetime, disable collisions on HRP to reduce crowd jamming.
 	-- Applies to both team NPCs and AI NPCs (anything we track here).
 	local hrp = npc:FindFirstChild("HumanoidRootPart")
@@ -92,9 +98,6 @@ function NpcDamagePopupService.TrackNpc(npc: Model)
 			if npc.Parent == nil or rootPart.Parent == nil then
 				return
 			end
-			pcall(function()
-				rootPart.CanCollide = false
-			end)
 			snapRootToCellCenterIfStamped(npc, rootPart)
 		end)
 	end

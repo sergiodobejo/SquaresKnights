@@ -8,11 +8,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local TeamColorService = require(script.Parent:WaitForChild("Services"):WaitForChild("TeamColorService"))
 local GridCellOccupancyService = require(script.Parent:WaitForChild("Services"):WaitForChild("GridCellOccupancyService"))
 local CastleHealthService = require(script.Parent:WaitForChild("Services"):WaitForChild("CastleHealthService"))
 local OpenArenaCornerReservationService = require(script.Parent:WaitForChild("Services"):WaitForChild("OpenArenaCornerReservationService"))
+local PlayerDataService = require(ServerScriptService.Services:WaitForChild("PlayerDataService"))
+local WarriorValueService = require(ServerScriptService.Services:WaitForChild("WarriorValueService"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
@@ -29,6 +32,75 @@ local CASTLE_YAW_ADJUST_DEG = 135 -- counter-clockwise
 local TEAM_COLOR_ATTRIBUTE = "TeamColor"
 
 local CORNER_ID_ATTRIBUTE = "CornerId" -- 1..4, used for baseplate corner placement
+
+local OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE = "OpenArenaStartCoinsApplied"
+
+local function waitForCoinsValue(player: Player): IntValue?
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		leaderstats = player:WaitForChild("leaderstats", 5)
+	end
+	if not (leaderstats and leaderstats:IsA("Folder")) then
+		return nil
+	end
+	local coins = leaderstats:FindFirstChild("Coins")
+	if not coins then
+		coins = leaderstats:WaitForChild("Coins", 5)
+	end
+	if coins and coins:IsA("IntValue") then
+		return coins
+	end
+	return nil
+end
+
+local function applyOpenArenaStartingCoinsIfNeeded(player: Player)
+	if player:GetAttribute(OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE) == true then
+		return
+	end
+
+	if not OpenArenaCornerReservationService.IsActive() then
+		return
+	end
+
+	local maxSum: number? = nil
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player then
+			local coins = PlayerDataService.GetCoins(other)
+			local warriorValue = WarriorValueService.GetWarriorValue(other)
+			local sum = coins + warriorValue
+			if maxSum == nil or sum > maxSum then
+				maxSum = sum
+			end
+		end
+	end
+
+	-- If this is the first player, keep default starting coins.
+	if maxSum == nil then
+		pcall(function()
+			player:SetAttribute(OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE, true)
+		end)
+		return
+	end
+
+	local coinsValue = waitForCoinsValue(player)
+	if coinsValue then
+		coinsValue.Value = math.max(0, math.floor(maxSum))
+		pcall(function()
+			player:SetAttribute(OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE, true)
+		end)
+	else
+		-- Try again shortly if leaderstats aren't ready yet.
+		task.delay(0.5, function()
+			local coinsValueRetry = waitForCoinsValue(player)
+			if coinsValueRetry then
+				coinsValueRetry.Value = math.max(0, math.floor(maxSum :: number))
+			end
+			pcall(function()
+				player:SetAttribute(OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE, true)
+			end)
+		end)
+	end
+end
 
 local function getOrCreateFolder(parent: Instance, name: string): Folder
 	local existing = parent:FindFirstChild(name)
@@ -418,6 +490,7 @@ end
 
 local function onPlayerAdded(player: Player)
 	ensureCastleForPlayer(player)
+	applyOpenArenaStartingCoinsIfNeeded(player)
 
 	player.CharacterAdded:Connect(function(character)
 		-- Defer so Humanoid/HRP are guaranteed to exist.

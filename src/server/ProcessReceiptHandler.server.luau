@@ -10,6 +10,7 @@ local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 local NpcSpawnService = require(ServerScriptService.Services.NpcSpawnService)
 local GridCellSpawnService = require(ServerScriptService.Services.GridCellSpawnService)
+local WarriorValueService = require(ServerScriptService.Services.WarriorValueService)
 
 local DEBUG_ROBUX = (RuntimeSettings :: any).DebugRobuxReceipts == true
 
@@ -125,8 +126,9 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 		local unitClass = cfg.UnitClass
 		local unitKindStr = tostring(unitKind)
 		local unitClassStr = tostring(unitClass)
+		local priceCoins = tonumber((cfg :: any).Price) or 0
 
-		local gridOk, reason, spawnCellKey, teleportToCellKey = GridCellSpawnService.TrySpawnShopItemOnCurrentCell(
+		local gridOk, reason, spawnCellKey, teleportToCellKey, gridSpawnedNpc = GridCellSpawnService.TrySpawnShopItemOnCurrentCell(
 			player,
 			itemName
 		)
@@ -159,6 +161,10 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 				decision = Enum.ProductPurchaseDecision.NotProcessedYet
 				return
 			end
+
+			if priceCoins > 0 then
+				WarriorValueService.RegisterPurchasedNpc(player, spawned, priceCoins)
+			end
 		else
 			if DEBUG_ROBUX then
 				print(string.format(
@@ -168,6 +174,10 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 					tostring(spawnCellKey),
 					tostring(teleportToCellKey)
 				))
+			end
+
+			if gridSpawnedNpc and priceCoins > 0 then
+				WarriorValueService.RegisterPurchasedNpc(player, gridSpawnedNpc, priceCoins)
 			end
 		end
 

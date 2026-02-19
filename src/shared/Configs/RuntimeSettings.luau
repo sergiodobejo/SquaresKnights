@@ -4,7 +4,7 @@
 export type Mode = "ProductionMode" | "TestMode"
 
 -- Switch the game mode here.
-local CURRENT_MODE: Mode = "TestMode"
+local CURRENT_MODE: Mode = "ProductionMode"
 
 type Settings = {
 	Mode: Mode,
