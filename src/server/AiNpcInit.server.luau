@@ -13,7 +13,7 @@ local AiNpcConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChi
 AiNpcService.StartSpawning()
 
 print(string.format(
-	"[AiNpcInit] AI NPC system started; spawning every %s seconds into Workspace/NPC folder",
+	"[AiNpcInit] AI NPC system started; base interval=%ss at 1 player (decreases by 1s per additional player, min 1s)",
 	tostring(AiNpcConfig.SpawnIntervalSeconds)
 ))
 

@@ -3,6 +3,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local AiNpcConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("AiNpcConfig"))
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
@@ -199,10 +200,21 @@ end
 
 local Shared = {}
 
+local function getDynamicSpawnIntervalSeconds(): number
+	local base = AiNpcConfig.SpawnIntervalSeconds
+	if type(base) ~= "number" or base ~= base or base <= 0 then
+		base = 5
+	end
+	local playerCount = #Players:GetPlayers()
+	-- 1 player => base, 2 players => base-1, 3 players => base-2, ...
+	local interval = base - math.max(0, playerCount - 1)
+	return math.max(1, interval)
+end
+
 function Shared.StartSpawning()
 	task.spawn(function()
 		while true do
-			task.wait(AiNpcConfig.SpawnIntervalSeconds)
+			task.wait(getDynamicSpawnIntervalSeconds())
 			
 			-- Pick a random castle target
 			local targetCastle = pickRandomCastle()
