@@ -26,7 +26,7 @@ local production: Settings = {
 	EnableDataStore = true,
 	StartingCoins = 10,
 	CaptureHighlightSeconds = 2,
-	EnableToYourCastleButton = false,
+	EnableToYourCastleButton = true,
 }
 
 local test: Settings = {
@@ -37,7 +37,7 @@ local test: Settings = {
 	EnableDataStore = false,
 	StartingCoins = 3000,
 	CaptureHighlightSeconds = 2,
-	EnableToYourCastleButton = false,
+	EnableToYourCastleButton = true,
 }
 
 local settings: Settings
