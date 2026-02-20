@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
+local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
 local OpenArenaCornerReservationService = require(ServerScriptService.Services:WaitForChild("OpenArenaCornerReservationService"))
 
@@ -76,11 +77,48 @@ local function getOnlyAliveOwnerUserId(alive: { [number]: boolean }): number
 	return 0
 end
 
+local function cleanupOwnedNpcsForUserId(userId: number)
+	if type(userId) ~= "number" or userId <= 0 then
+		return
+	end
+
+	local liveNpcFolder = Workspace:FindFirstChild("LiveNPC")
+	if not liveNpcFolder or not liveNpcFolder:IsA("Folder") then
+		return
+	end
+
+	local function maybeDestroyNpc(inst: Instance)
+		if not inst:IsA("Model") then
+			return
+		end
+		local npc = inst :: Model
+		if Affiliation.GetOwnerUserIdFromModel(npc) ~= userId then
+			return
+		end
+		pcall(function()
+			npc:Destroy()
+		end)
+	end
+
+	for _, child in ipairs((liveNpcFolder :: Folder):GetChildren()) do
+		if child:IsA("Folder") then
+			for _, sub in ipairs(child:GetChildren()) do
+				maybeDestroyNpc(sub)
+			end
+		else
+			maybeDestroyNpc(child)
+		end
+	end
+end
+
 local function markAndHandleDefeat(player: Player)
 	if defeatedByUserId[player.UserId] then
 		return
 	end
 	defeatedByUserId[player.UserId] = true
+
+	-- Immediately clear this player's NPCs so their occupied cells/territory are freed for the match.
+	cleanupOwnedNpcsForUserId(player.UserId)
 
 	task.delay(PRE_RESULT_DELAY_SECONDS, function()
 		if not player.Parent then
@@ -297,6 +335,8 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
+	-- If a player leaves mid-match, clear their NPCs so cells are freed.
+	cleanupOwnedNpcsForUserId(player.UserId)
 	defeatedByUserId[player.UserId] = nil
 	territoryWatcherByUserId[player.UserId] = nil
 end)
