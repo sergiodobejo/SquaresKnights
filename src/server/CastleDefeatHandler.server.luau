@@ -284,13 +284,12 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 		return
 	end
 	local player = Players:GetPlayerByUserId(ownerUserId)
-	if not player then
-		return
+	if player then
+		if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true or defeatedByUserId[player.UserId] then
+			return
+		end
+		markAndHandleDefeat(player)
 	end
-	if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true or defeatedByUserId[player.UserId] then
-		return
-	end
-	markAndHandleDefeat(player)
 
 	if matchEnded then
 		return
@@ -325,11 +324,13 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 	end
 
 	-- More than one player still alive: notify remaining players briefly.
-	local defeatedName = player.Name
-	local msg = string.format("%s defeated!", defeatedName)
-	for _, p in ipairs(Players:GetPlayers()) do
-		if alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
-			defeatedRemote:FireClient(p, msg, 1.5)
+	if player then
+		local defeatedName = player.Name
+		local msg = string.format("%s defeated!", defeatedName)
+		for _, p in ipairs(Players:GetPlayers()) do
+			if alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
+				defeatedRemote:FireClient(p, msg, 1.5)
+			end
 		end
 	end
 end)
@@ -337,6 +338,29 @@ end)
 Players.PlayerRemoving:Connect(function(player: Player)
 	-- If a player leaves mid-match, clear their NPCs so cells are freed.
 	cleanupOwnedNpcsForUserId(player.UserId)
+
+	-- Fallback: in normal mode, if after a leave only one player remains, grant them victory.
+	-- This makes “opponent left” use the same win flow even if castle-destruction signaling
+	-- is delayed or suppressed by ordering.
+	task.spawn(function()
+		local deadline = os.clock() + 2.0
+		while os.clock() < deadline do
+			if matchEnded or isOpenArenaMode() then
+				return
+			end
+			local players = Players:GetPlayers()
+			if #players == 1 then
+				local winner = players[1]
+				if winner and winner.Parent ~= nil then
+					if winner:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true and winner:GetAttribute(PLAYER_VICTORY_ATTR) ~= true then
+						endMatchWithWinner(winner, "opponent_left")
+					end
+				end
+				return
+			end
+			task.wait(0.1)
+		end
+	end)
 	defeatedByUserId[player.UserId] = nil
 	territoryWatcherByUserId[player.UserId] = nil
 end)

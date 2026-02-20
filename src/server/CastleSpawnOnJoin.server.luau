@@ -528,6 +528,24 @@ local function onPlayerRemoving(player: Player)
 	local castle = castlesByUserId[userId]
 	castlesByUserId[userId] = nil
 	if castle and castle.Parent then
+		-- In non-OpenArena 1v1, treat leaving as losing your castle.
+		-- This intentionally goes through CastleHealthService so CastleDefeatHandler receives
+		-- the same OnCastleDestroyed signal as it does for damage-based destruction.
+		local remainingPlayers = 0
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player then
+				remainingPlayers += 1
+			end
+		end
+		if (not OpenArenaCornerReservationService.IsActive()) and (remainingPlayers == 1) then
+			local ok = false
+			pcall(function()
+				ok = CastleHealthService.ApplyDamage(castle, CastleHealthService.GetMaxHealth(castle) + 1, nil)
+			end)
+			if ok then
+				return
+			end
+		end
 		castle:Destroy()
 	end
 end
