@@ -13,7 +13,7 @@ local OWNER_USER_ID_ATTR = "OwnerUserId"
 
 local GUI_NAME = "CastleHealthBillboard"
 
-local DEFAULT_MAX_HEALTH = 1000
+local DEFAULT_MAX_HEALTH = 3000
 
 local CASTLE_DESTROYED_SFX_ID = "rbxassetid://83808819886243"
 local CASTLE_DESTROYED_SFX_VOLUME = 0.6
@@ -79,10 +79,67 @@ local function formatHealth(value: number): string
 	return tostring(math.floor(value + 0.5))
 end
 
+
+local UPDATE_THROTTLE_SECONDS = 0.1
+local lastBillboardUpdateAtByCastle: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local pendingBillboardUpdateByCastle: { [Model]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+local function ensureBillboardContents(gui: BillboardGui)
+	local label = gui:FindFirstChild("Label")
+	if not (label and label:IsA("TextLabel")) then
+		label = Instance.new("TextLabel")
+		label.Name = "Label"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.new(1, 0, 0, 34)
+		label.Position = UDim2.fromOffset(0, 0)
+		label.TextScaled = true
+		label.Font = Enum.Font.GothamBold
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.TextStrokeTransparency = 0.25
+		label.Text = ""
+		label.Parent = gui
+	end
+
+	local barBg = gui:FindFirstChild("BarBg")
+	if not (barBg and barBg:IsA("Frame")) then
+		barBg = Instance.new("Frame")
+		barBg.Name = "BarBg"
+		barBg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		barBg.BackgroundTransparency = 0.35
+		barBg.BorderSizePixel = 0
+		barBg.AnchorPoint = Vector2.new(0.5, 1)
+		barBg.Position = UDim2.new(0.5, 0, 1, -6)
+		barBg.Size = UDim2.new(1, -18, 0, 10)
+		barBg.Parent = gui
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 4)
+		corner.Parent = barBg
+	end
+
+	local fill = (barBg :: Frame):FindFirstChild("Fill")
+	if not (fill and fill:IsA("Frame")) then
+		fill = Instance.new("Frame")
+		fill.Name = "Fill"
+		fill.BackgroundColor3 = Color3.fromRGB(60, 220, 80)
+		fill.BorderSizePixel = 0
+		fill.Position = UDim2.fromScale(0, 0)
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.Parent = barBg
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 4)
+		corner.Parent = fill
+	end
+
+	return label :: TextLabel, fill :: Frame
+end
+
 local function ensureBillboardGui(castle: Model, adornee: BasePart)
 	local existing = castle:FindFirstChild(GUI_NAME)
 	if existing and existing:IsA("BillboardGui") then
 		(existing :: BillboardGui).Adornee = adornee
+		ensureBillboardContents(existing :: BillboardGui)
 		return existing :: BillboardGui
 	end
 
@@ -95,16 +152,7 @@ local function ensureBillboardGui(castle: Model, adornee: BasePart)
 	gui.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
 	gui.Adornee = adornee
 
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeTransparency = 0.25
-	label.Text = ""
-	label.Parent = gui
+	ensureBillboardContents(gui)
 
 	gui.Parent = castle
 	return gui
@@ -115,10 +163,7 @@ local function updateBillboardText(castle: Model)
 	if not (gui and gui:IsA("BillboardGui")) then
 		return
 	end
-	local label = gui:FindFirstChild("Label")
-	if not (label and label:IsA("TextLabel")) then
-		return
-	end
+	local label, fill = ensureBillboardContents(gui :: BillboardGui)
 
 	local health = castle:GetAttribute(HEALTH_ATTR)
 	local maxHealth = castle:GetAttribute(MAX_HEALTH_ATTR)
@@ -128,7 +173,39 @@ local function updateBillboardText(castle: Model)
 	if type(maxHealth) ~= "number" or maxHealth <= 0 then
 		maxHealth = DEFAULT_MAX_HEALTH
 	end
-	(label :: TextLabel).Text = formatHealth(health)
+	label.Text = formatHealth(health)
+	local ratio = 0
+	if maxHealth > 0 then
+		ratio = math.clamp((health :: number) / (maxHealth :: number), 0, 1)
+	end
+	fill.Size = UDim2.new(ratio, 0, 1, 0)
+end
+
+local function scheduleBillboardUpdate(castle: Model)
+	if not castle or not castle.Parent then
+		return
+	end
+	local now = os.clock()
+	local lastAt = lastBillboardUpdateAtByCastle[castle] or -1e9
+	local elapsed = now - lastAt
+	if elapsed >= UPDATE_THROTTLE_SECONDS then
+		lastBillboardUpdateAtByCastle[castle] = now
+		updateBillboardText(castle)
+		return
+	end
+	if pendingBillboardUpdateByCastle[castle] then
+		return
+	end
+	pendingBillboardUpdateByCastle[castle] = true
+	local delaySeconds = math.max(0, UPDATE_THROTTLE_SECONDS - elapsed)
+	task.delay(delaySeconds, function()
+		pendingBillboardUpdateByCastle[castle] = nil
+		if not castle or not castle.Parent then
+			return
+		end
+		lastBillboardUpdateAtByCastle[castle] = os.clock()
+		updateBillboardText(castle)
+	end)
 end
 
 local connectionsByCastle: { [Model]: { RBXScriptConnection } } = setmetatable({}, { __mode = "k" }) :: any
@@ -222,7 +299,7 @@ function Shared.InitCastle(castle: Model, teamId: number?, ownerUserId: number?,
 	local adornee = getAnyBasePart(castle)
 	if adornee then
 		ensureBillboardGui(castle, adornee)
-		updateBillboardText(castle)
+		scheduleBillboardUpdate(castle)
 	end
 
 	-- Avoid double-connecting.
@@ -234,10 +311,10 @@ function Shared.InitCastle(castle: Model, teamId: number?, ownerUserId: number?,
 	connectionsByCastle[castle] = conns
 
 	table.insert(conns, castle:GetAttributeChangedSignal(HEALTH_ATTR):Connect(function()
-		updateBillboardText(castle)
+		scheduleBillboardUpdate(castle)
 	end))
 	table.insert(conns, castle:GetAttributeChangedSignal(MAX_HEALTH_ATTR):Connect(function()
-		updateBillboardText(castle)
+		scheduleBillboardUpdate(castle)
 	end))
 	table.insert(conns, castle.AncestryChanged:Connect(function(_, parent)
 		if parent ~= nil then

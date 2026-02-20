@@ -423,7 +423,7 @@ local function ensureCastleForPlayer(player: Player)
 	-- Stamp affiliation + health for combat systems.
 	-- Use the same TeamId semantics as NPCs/players.
 	local teamId = getTeamIdForPlayer(player)
-	CastleHealthService.InitCastle(clone, teamId, player.UserId, 1000)
+	CastleHealthService.InitCastle(clone, teamId, player.UserId, 3000)
 
 	local castlePivotCf, spawnCf = computeCastleAndSpawnCFrames(baseplate, clone, cornerId)
 
