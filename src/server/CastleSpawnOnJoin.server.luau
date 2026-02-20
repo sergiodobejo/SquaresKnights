@@ -163,6 +163,16 @@ local function applyBuildingTextureForPlayer(model: Model, player: Player)
 	end
 end
 
+local function anchorAllParts(model: Model)
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			pcall(function()
+				(inst :: BasePart).Anchored = true
+			end)
+		end
+	end
+end
+
 local function getTeamIdForPlayer(player: Player): number
 	local colorName = TeamColorService.GetColorForPlayer(player)
 	if type(colorName) == "string" then
@@ -418,6 +428,7 @@ local function ensureCastleForPlayer(player: Player)
 	end
 	local clone = template:Clone()
 	clone.Name = string.format("%s_%d", CASTLE_MODEL_NAME, player.UserId)
+	anchorAllParts(clone)
 	applyBuildingTextureForPlayer(clone, player)
 
 	-- Stamp affiliation + health for combat systems.
