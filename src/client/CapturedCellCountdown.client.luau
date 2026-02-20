@@ -7,6 +7,8 @@ local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
+local GuiStrings = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiStrings"))
+
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 
@@ -44,7 +46,7 @@ local TEXT_SIZE = 18
 local MAX_DISTANCE = 120
 local GUI_SIZE = UDim2.fromOffset(40, 40)
 
-local CAPTURED_TEXT = "Captured"
+local CAPTURED_TEXT = GuiStrings.get("CapturedCellCountdown_Captured", "Captured")
 local CAPTURED_PLATE_THICKNESS = 0.05
 -- Place above the server-side captured overlay (keeps existing overlay intact).
 local CAPTURED_PLATE_Y_OFFSET = 0.44

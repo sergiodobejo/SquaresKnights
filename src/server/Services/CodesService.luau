@@ -46,13 +46,13 @@ function CodesService.OnStart()
 		local code = normalize(rawCode)
 		print("[CodesService] Redeem request", player.Name, tostring(rawCode), "->", tostring(code))
 		if not code then
-			reply(player, false, "Code Invalid")
+			reply(player, false, "CodeInvalid")
 			return
 		end
 
 		local state = PlayerDataService.GetState(player)
 		if not state then
-			reply(player, false, "Code Invalid")
+			reply(player, false, "CodeInvalid")
 			return
 		end
 
@@ -69,12 +69,12 @@ function CodesService.OnStart()
 		if reward.Type == "Coins" then
 			PlayerDataService.AddCoins(player, reward.Amount)
 		else
-			reply(player, false, "Code Invalid")
+			reply(player, false, "CodeInvalid")
 			return
 		end
 
 		PlayerDataService.MarkCodeRedeemed(player, (codeObject :: any).Code)
-		reply(player, true, "Code Redeemed", reward.Amount)
+		reply(player, true, "CodeRedeemed", reward.Amount)
 	end)
 end
 

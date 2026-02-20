@@ -5,6 +5,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 
+local GuiStrings = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiStrings"))
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -15,7 +17,7 @@ local defeatedRemote = remotesFolder:WaitForChild(RemoteNames.PlayerDefeated) ::
 local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
 
 local GUI_NAME = "DefeatOverlay"
-local DEFAULT_TEXT = "You have been defeated."
+local DEFAULT_TEXT = GuiStrings.get("DefeatOverlay_DefaultText", "You have been defeated.")
 local DEFAULT_MAX_TEXT_SIZE = 140
 
 local LOSE_SFX_ID = "rbxassetid://75759245900834"

@@ -3,6 +3,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local GuiStrings = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiStrings"))
+
 local TeamColors = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamColors"))
 local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
@@ -88,7 +90,7 @@ local function createButton(parent: Instance, bg: Color3, textColor: Color3, str
 	button.Font = Enum.Font.LuckiestGuy
 	button.TextScaled = false
 	button.TextSize = 26
-	button.Text = "To Your Castle"
+	button.Text = GuiStrings.get("YourColorBanner_ToYourCastle", "To Your Castle")
 	button.TextColor3 = textColor
 	button.TextXAlignment = Enum.TextXAlignment.Center
 	button.TextYAlignment = Enum.TextYAlignment.Center
@@ -123,7 +125,7 @@ local function createUnderAttackLabel(parent: Instance): TextLabel
 	label.TextScaled = false
 	label.TextSize = 20
 	label.TextWrapped = true
-	label.Text = "Castle under attack!\nDefend the castle!"
+	label.Text = GuiStrings.get("YourColorBanner_CastleUnderAttack", "Castle under attack!\nDefend the castle!")
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 0
 	label.TextStrokeColor3 = Color3.new(0, 0, 0)
@@ -162,7 +164,12 @@ local function main()
 	local strokeColor = strokeForColorName(colorName)
 
 	local top = createTopContainer()
-	local label = createLabel(top, teamColor3, strokeColor, string.format("Your color - %s", prettifyColorName(colorName)))
+	local label = createLabel(
+		top,
+		teamColor3,
+		strokeColor,
+		GuiStrings.format("YourColorBanner_YourColorFormat", "Your color - %s", prettifyColorName(colorName))
+	)
 
 	task.delay(DISPLAY_SECONDS, function()
 		if label.Parent then

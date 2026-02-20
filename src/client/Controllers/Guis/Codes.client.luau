@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GuiController = require(script.Parent.Parent.GuiController)
+local GuiStrings = require(script.Parent.Parent:WaitForChild("GuiStrings"))
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local RedeemCodeRemote: RemoteEvent = Remotes:WaitForChild("RedeemCode")
@@ -47,11 +48,14 @@ local originalTextColor: Color3?
 local statusOkColor = Color3.fromRGB(0, 200, 0)
 local statusFailColor = Color3.fromRGB(220, 0, 0)
 
+local codeBoxHasStatus = false
+
 local function showInBox(text: string, ok: boolean?)
 	if not CodeBox or not CodeBox:IsA("TextBox") then
 		return
 	end
 	CodeBox.Text = text
+	codeBoxHasStatus = true
 	if ok == true then
 		CodeBox.TextColor3 = statusOkColor
 	elseif ok == false then
@@ -59,6 +63,11 @@ local function showInBox(text: string, ok: boolean?)
 	elseif originalTextColor then
 		CodeBox.TextColor3 = originalTextColor
 	end
+end
+
+local function showStatus(key: string, ok: boolean?, ...: any)
+	local text = GuiStrings.format("Codes_" .. key, key, ...)
+	showInBox(text, ok)
 end
 
 local function setBusy(isBusy: boolean)
@@ -73,6 +82,7 @@ function Local.Toggle()
 	if Gui.Enabled then
 		if CodeBox and CodeBox:IsA("TextBox") then
 			CodeBox.Text = ""
+			codeBoxHasStatus = false
 			if originalTextColor then
 				CodeBox.TextColor3 = originalTextColor
 			end
@@ -93,11 +103,11 @@ function Local.Redeem()
 	local code = CodeBox.Text
 	code = code:gsub("^%s+", ""):gsub("%s+$", "")
 	if code == "" then
-		showInBox("Code Invalid", false)
+		showStatus("CodeInvalid", false)
 		return
 	end
 	setBusy(true)
-	showInBox("Checking...", nil)
+	showStatus("Checking", nil)
 	print("[Codes GUI] Redeem clicked:", code)
 	RedeemCodeRemote:FireServer(code)
 end
@@ -124,12 +134,19 @@ function Local.Bind()
 		setBusy(false)
 		if ok then
 			if typeof(amount) == "number" then
-				showInBox("Code Redeemed ( +" .. tostring(amount) .. " Coins )", true)
+				showStatus("CodeRedeemedWithAmountFormat", true, tostring(amount))
 			else
-				showInBox("Code Redeemed", true)
+				showStatus("CodeRedeemed", true)
 			end
 		else
-			showInBox(message or "Code Invalid", false)
+			local key = if type(message) == "string" and message ~= "" then message else "CodeInvalid"
+			-- Server sends message keys (e.g. CodeInvalid). Fallback to raw message if no StringValue exists.
+			local localized = GuiStrings.get("Codes_" .. key, "")
+			if localized ~= "" and localized ~= ("Codes_" .. key) then
+				showInBox(localized, false)
+			else
+				showInBox(key, false)
+			end
 		end
 	end)
 end
@@ -149,9 +166,10 @@ function Local.OnStart()
 			if originalTextColor then
 				CodeBox.TextColor3 = originalTextColor
 			end
-			-- if box currently contains a status message, clear it for typing
-			if CodeBox.Text == "Code Invalid" or CodeBox.Text == "Code Expired" or CodeBox.Text == "Code Already Redeemed" or CodeBox.Text == "Code Redeemed" or CodeBox.Text == "Checking..." then
+			-- If box currently contains a status message, clear it for typing.
+			if codeBoxHasStatus then
 				CodeBox.Text = ""
+				codeBoxHasStatus = false
 			end
 		end)
 	end

@@ -6,6 +6,8 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Workspace = game:GetService("Workspace")
 
+local GuiStrings = require(script.Parent.Parent:WaitForChild("GuiStrings"))
+
 local GuiController = require(script.Parent.Parent.GuiController)
 local ShopConfig = require(ReplicatedStorage.Configs.ShopConfig)
 local FormatNumber = require(ReplicatedStorage.Libs.FormatNumber.Simple)
@@ -95,7 +97,7 @@ local function ensureNotEnoughMoneyOverlay(): TextLabel
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.fromScale(0.5, 0.5)
 	label.Size = UDim2.fromScale(1, 0.12)
-	label.Text = "Not enough money"
+	label.Text = GuiStrings.get("Shop_NotEnoughMoney", "Not enough money")
 	label.TextWrapped = true
 	label.TextScaled = true
 	label.Visible = false

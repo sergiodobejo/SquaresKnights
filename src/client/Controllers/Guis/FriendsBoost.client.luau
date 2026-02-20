@@ -6,6 +6,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local GuiController = require(script.Parent.Parent.GuiController)
+local GuiStrings = require(script.Parent.Parent:WaitForChild("GuiStrings"))
 
 local GUI = GuiController.Guis.Right
 local Buttons = GUI.Frame.Buttons
@@ -212,20 +213,41 @@ function Shared.OnStart()
 
 	boostRemote.OnClientEvent:Connect(function(boost: number)
 		currentBoost = boost
-		Button.Text = "Friends Boost: x" .. tostring(boost)
+		Button.Text = GuiStrings.format("FriendsBoost_ButtonFormat", "Friends Boost: x%s", tostring(boost))
 	end)
 
 	notifyRemote.OnClientEvent:Connect(function(friendDisplayName: string, isJoin: boolean, boost: number?)
 		local b = boost or currentBoost
 		if isJoin then
-			showBanner(friendDisplayName .. " joined. Friends Boost x" .. tostring(b))
+			showBanner(
+				GuiStrings.format(
+					"FriendsBoost_FriendJoinedFormat",
+					"%s joined. Friends Boost x%s",
+					friendDisplayName,
+					tostring(b)
+				)
+			)
 		else
-			showBanner(friendDisplayName .. " left. Friends Boost x" .. tostring(b))
+			showBanner(
+				GuiStrings.format(
+					"FriendsBoost_FriendLeftFormat",
+					"%s left. Friends Boost x%s",
+					friendDisplayName,
+					tostring(b)
+				)
+			)
 		end
 	end)
 
 	presenceRemote.OnClientEvent:Connect(function(friendDisplayName: string, boost: number)
-		showBanner("You joined " .. friendDisplayName .. ". Friends Boost x" .. tostring(boost))
+		showBanner(
+			GuiStrings.format(
+				"FriendsBoost_YouJoinedFormat",
+				"You joined %s. Friends Boost x%s",
+				friendDisplayName,
+				tostring(boost)
+			)
+		)
 	end)
 end
 

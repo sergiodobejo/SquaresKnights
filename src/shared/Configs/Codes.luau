@@ -136,17 +136,17 @@ end
 
 function Shared.IsRedeemable(codeObject: CodeObject?, state: RedeemState)
 	if not codeObject then
-		return "Code Invalid"
+		return "CodeInvalid"
 	end
 
 	local isExpired = Shared.IsExpired(codeObject)
 	if isExpired then
-		return "Code Expired"
+		return "CodeExpired"
 	end
 
 	local isRedeemed = Shared.IsRedeemed(codeObject, state)
 	if isRedeemed then
-		return "Code Already Redeemed"
+		return "CodeAlreadyRedeemed"
 	end
 
 	return true

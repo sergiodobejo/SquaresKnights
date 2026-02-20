@@ -5,6 +5,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local GuiStrings = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiStrings"))
+
 local NpcIconRenderer = require(script.Parent:WaitForChild("Controllers"):WaitForChild("NpcIconRenderer"))
 
 local LOCAL_PLAYER = Players.LocalPlayer
@@ -308,7 +310,8 @@ local function createIconCell(parent: Instance, npcModel: Model): Frame
 		yawOffsetRadians = ICON_YAW_OFFSET_RADIANS,
 	})
 	if not hasHrp then
-		nameLabel.Text = NpcIconRenderer.getUnitIconLabel(npcModel) .. " (no HRP)"
+		nameLabel.Text = NpcIconRenderer.getUnitIconLabel(npcModel)
+			.. GuiStrings.get("NpcIconGallery_NoHrpSuffix", " (no HRP)")
 	end
 
 	return cell
@@ -349,7 +352,7 @@ local function buildGui()
 	title.TextSize = 18
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.Text = "NPC Icon Gallery (F6)"
+	title.Text = GuiStrings.get("NpcIconGallery_Title", "NPC Icon Gallery (F6)")
 	title.Parent = top
 
 	local close = Instance.new("TextButton")
@@ -362,7 +365,7 @@ local function buildGui()
 	close.TextColor3 = Color3.fromRGB(255, 255, 255)
 	close.BackgroundColor3 = Color3.fromRGB(40, 40, 44)
 	close.BorderSizePixel = 0
-	close.Text = "Close"
+	close.Text = GuiStrings.get("Common_Close", "Close")
 	close.Parent = top
 
 	local closeCorner = Instance.new("UICorner")
@@ -413,7 +416,7 @@ local function populate(scroll: ScrollingFrame)
 		warnLabel.Font = Enum.Font.Gotham
 		warnLabel.TextSize = 16
 		warnLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
-		warnLabel.Text = "ReplicatedStorage/NPC not found"
+		warnLabel.Text = GuiStrings.get("NpcIconGallery_NpcNotFound", "ReplicatedStorage/NPC not found")
 		warnLabel.Parent = scroll
 		return
 	end
@@ -426,7 +429,10 @@ local function populate(scroll: ScrollingFrame)
 		warnLabel.Font = Enum.Font.Gotham
 		warnLabel.TextSize = 16
 		warnLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
-		warnLabel.Text = "No NPC models found in ReplicatedStorage/NPC"
+		warnLabel.Text = GuiStrings.get(
+			"NpcIconGallery_NoNpcModelsFound",
+			"No NPC models found in ReplicatedStorage/NPC"
+		)
 		warnLabel.Parent = scroll
 		return
 	end

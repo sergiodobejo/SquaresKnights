@@ -5,6 +5,8 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local GuiStrings = require(script.Parent:WaitForChild("Controllers"):WaitForChild("GuiStrings"))
+
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 local SQUARE_SIZE = GridCells.SQUARE_SIZE_STUDS
 
@@ -14,7 +16,7 @@ local HEIGHT_OFFSET = 0.02
 
 local HINT_PLATE_THICKNESS = 0.05
 local HINT_PLATE_Y_OFFSET = 0.02
-local HINT_TEXT = "Tap here to spawn"
+local HINT_TEXT = GuiStrings.get("GridSquareHighlighter_TapHereToSpawn", "Tap here to spawn")
 
 local COLOR = Color3.fromRGB(0, 255, 170)
 local TRANSPARENCY = 0.25

@@ -2,6 +2,8 @@
 
 local Players = game:GetService("Players")
 
+local GuiStrings = require(script.Parent.Parent:WaitForChild("GuiStrings"))
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -31,15 +33,15 @@ label.Font = Enum.Font.GothamBold
 label.TextSize = 18
 label.TextColor3 = Color3.fromRGB(255, 255, 255)
 label.TextStrokeTransparency = 0.5
-label.Text = "Team: ?"
+label.Text = GuiStrings.get("TeamColorDebug_Unknown", "Team: ?")
 label.Parent = screenGui
 
 local function update()
 	local colorName = player:GetAttribute(TEAM_COLOR_ATTRIBUTE)
 	if type(colorName) ~= "string" or colorName == "" then
-		label.Text = "Team: ?"
+		label.Text = GuiStrings.get("TeamColorDebug_Unknown", "Team: ?")
 	else
-		label.Text = "Team: " .. colorName
+		label.Text = GuiStrings.format("TeamColorDebug_Format", "Team: %s", colorName)
 	end
 end
 

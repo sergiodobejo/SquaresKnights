@@ -5,6 +5,8 @@ local RunService = game:GetService("RunService")
 
 local AnimationsConfig = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("Animations"))
 
+local GuiStrings = require(script.Parent:WaitForChild("GuiStrings"))
+
 local rng = Random.new()
 
 local NpcIconRenderer = {}
@@ -235,7 +237,7 @@ function NpcIconRenderer.getUnitIconLabel(model: Model): string
 		if kindLower == "infantry" then
 			return classLabel
 		elseif kindLower == "cavalry" then
-			return "Cav. " .. classLabel
+			return GuiStrings.format("NpcIconRenderer_CavalryFormat", "Cav. %s", classLabel)
 		end
 	end
 
