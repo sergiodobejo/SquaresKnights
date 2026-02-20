@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 
@@ -132,6 +133,11 @@ local function canStartCaptureCinematic(): boolean
 	if cinematicRunning then
 		return false
 	end
+	-- Avoid fighting other cinematics; also prevents capturing a Scriptable state as the "original".
+	local cam = Workspace.CurrentCamera
+	if cam and cam.CameraType == Enum.CameraType.Scriptable then
+		return false
+	end
 	local now = os.clock()
 	return (now - lastCinematicAt) >= CAMERA_COOLDOWN_SECONDS
 end
@@ -164,6 +170,40 @@ local function getCurrentCamera(): Camera?
 		return cam
 	end
 	return nil
+end
+
+local function restoreCamera(cam: Camera, originalType: Enum.CameraType, originalCFrame: CFrame, originalFov: number)
+	pcall(function()
+		cam.CameraType = if originalType == Enum.CameraType.Scriptable then Enum.CameraType.Custom else originalType
+		cam.CFrame = originalCFrame
+		cam.FieldOfView = originalFov
+	end)
+
+	pcall(function()
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end)
+
+	pcall(function()
+		local character = player.Character
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		if humanoid then
+			cam.CameraSubject = humanoid
+		end
+	end)
+
+	task.defer(function()
+		if cam.Parent == nil then
+			return
+		end
+		if cam.CameraType == Enum.CameraType.Scriptable then
+			pcall(function()
+				cam.CameraType = Enum.CameraType.Custom
+			end)
+		end
+		pcall(function()
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end)
+	end)
 end
 
 local function tryGetCaptureOwnerUserId(marker: Instance): number?
@@ -533,18 +573,12 @@ local function playCaptureCameraCinematic(keys: { string })
 		backTween:Play()
 		backTween.Completed:Wait()
 
-		cam.CameraType = originalType
-		cam.CFrame = originalCFrame
-		cam.FieldOfView = originalFov
+		restoreCamera(cam, originalType, originalCFrame, originalFov)
 	end)
 
 	if not ok then
 		warn("[CapturedCellCountdown] Camera cinematic failed:", err)
-		pcall(function()
-			cam.CameraType = originalType
-			cam.CFrame = originalCFrame
-			cam.FieldOfView = originalFov
-		end)
+		restoreCamera(cam, originalType, originalCFrame, originalFov)
 	end
 
 	cinematicRunning = false

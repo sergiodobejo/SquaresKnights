@@ -6,6 +6,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
@@ -31,6 +32,42 @@ local HEIGHT_DIVISOR = 1.5
 
 local cinematicRunning = false
 local lastCinematicAt = -1e9
+
+local function restoreCamera(cam: Camera, originalType: Enum.CameraType, originalCFrame: CFrame, originalFov: number)
+	pcall(function()
+		-- If we captured Scriptable (due to overlapping cinematics), always fall back to normal player camera.
+		cam.CameraType = if originalType == Enum.CameraType.Scriptable then Enum.CameraType.Custom else originalType
+		cam.CFrame = originalCFrame
+		cam.FieldOfView = originalFov
+	end)
+
+	pcall(function()
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end)
+
+	pcall(function()
+		local character = LOCAL_PLAYER.Character
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		if humanoid then
+			cam.CameraSubject = humanoid
+		end
+	end)
+
+	-- Failsafe: if anything still left Scriptable, force back to Custom next tick.
+	task.defer(function()
+		if cam.Parent == nil then
+			return
+		end
+		if cam.CameraType == Enum.CameraType.Scriptable then
+			pcall(function()
+				cam.CameraType = Enum.CameraType.Custom
+			end)
+		end
+		pcall(function()
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end)
+	end)
+end
 
 local function getCurrentCamera(): Camera?
 	local cam = Workspace.CurrentCamera
@@ -195,18 +232,12 @@ local function playNpcSpawnCinematic(npc: Model)
 		backTween:Play()
 		backTween.Completed:Wait()
 
-		cam.CameraType = originalType
-		cam.CFrame = originalCFrame
-		cam.FieldOfView = originalFov
+		restoreCamera(cam, originalType, originalCFrame, originalFov)
 	end)
 
 	if not ok then
 		warn("[NpcSpawnCameraCinematic] NPC spawn cinematic failed:", err)
-		pcall(function()
-			cam.CameraType = originalType
-			cam.CFrame = originalCFrame
-			cam.FieldOfView = originalFov
-		end)
+		restoreCamera(cam, originalType, originalCFrame, originalFov)
 	end
 
 	cinematicRunning = false

@@ -64,19 +64,35 @@ end
 local function show(message: string?, durationSeconds: number?)
 	local gui = ensureGui()
 
-	local isVictory = false
-	if type(message) == "string" then
-		local lower = string.lower(message)
-		isVictory = lower:find("victory", 1, true) ~= nil
+	local localDefeated = player:GetAttribute("Defeated") == true
+	local localVictory = player:GetAttribute("Victory") == true
+
+	local lowerMessage = if type(message) == "string" then string.lower(message) else ""
+	local looksLikeVictoryMessage = lowerMessage:find("victory", 1, true) ~= nil
+	local looksLikeDefeatMessage = lowerMessage:find("you have been defeated", 1, true) ~= nil
+
+	-- Safety: never show/announce local defeat unless the local player is actually defeated.
+	if looksLikeDefeatMessage and not localDefeated then
+		return
 	end
-	SoundCache.Play(if isVictory then WIN_SFX_ID else LOSE_SFX_ID, {
-		parent = SoundService,
-		poolSize = 1,
-	})
+
+	-- Only play match-end SFX for the local player.
+	if localVictory or looksLikeVictoryMessage then
+		if localVictory then
+			SoundCache.Play(WIN_SFX_ID, { parent = SoundService, poolSize = 1 })
+		end
+	elseif localDefeated then
+		SoundCache.Play(LOSE_SFX_ID, { parent = SoundService, poolSize = 1 })
+	end
 
 	local label = gui:FindFirstChild("Label")
 	if label and label:IsA("TextLabel") then
-		(label :: TextLabel).Text = if type(message) == "string" and message ~= "" then message else DEFAULT_TEXT
+		-- Only the defeated local player should ever see the default defeat text.
+		local text = if type(message) == "string" and message ~= "" then message else DEFAULT_TEXT
+		if text == DEFAULT_TEXT and not localDefeated then
+			return
+		end
+		(label :: TextLabel).Text = text
 	end
 
 	hideToken += 1
