@@ -14,6 +14,32 @@ local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
 
+local function pickRandomValidCastle(exclude: Model?): Model?
+	local buildingsFolder = Workspace:FindFirstChild("PlayerBuildings")
+	if not buildingsFolder then
+		return nil
+	end
+
+	local castles: { Model } = {}
+	for _, child in ipairs(buildingsFolder:GetChildren()) do
+		if child:IsA("Model") and CastleHealthService.IsCastle(child) then
+			local castle = child :: Model
+			if castle ~= exclude and castle.Parent ~= nil and not CastleHealthService.IsDestroyed(castle) then
+				table.insert(castles, castle)
+			end
+		end
+	end
+
+	if #castles == 0 then
+		return nil
+	end
+	return castles[math.random(1, #castles)]
+end
+
+local function isValidCastleTarget(castle: Model?): boolean
+	return castle ~= nil and castle.Parent ~= nil and not CastleHealthService.IsDestroyed(castle)
+end
+
 local WALK_ANIM_SPEED_FACTOR = 1.5 -- animation speed multiplier
 local ATTACK_MARKER_NAME = "Attack"
 local ATTACK_RELEASE_PARAM = "1"
@@ -455,9 +481,18 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 
 	-- Choose an approach side + stable offset so units don't all converge to the same exact point.
 	local rng = Random.new()
-	local rootLocalAtStart = baseplate.CFrame:PointToObjectSpace(root.Position)
-	local approachSide = if castleRect then pickApproachSide(rootLocalAtStart, castleRect) else "xMax"
+	local approachSide = "xMax"
 	local sideOffset = rng:NextNumber(-6, 6)
+	local function retargetTo(newTarget: Model)
+		targetCastle = newTarget
+		castleRect = getCastleRectLocal(baseplate, newTarget)
+		castleCenterWorld = if castleRect then getCastleCenterWorld(baseplate, castleRect) else newTarget:GetPivot().Position
+		local rootLocalNow = baseplate.CFrame:PointToObjectSpace(root.Position)
+		approachSide = if castleRect then pickApproachSide(rootLocalNow, castleRect) else "xMax"
+		sideOffset = rng:NextNumber(-6, 6)
+	end
+
+	retargetTo(targetCastle)
 	
 	local unitKind, unitClass = getUnitKindAndClass(aiNpc)
 	local params = getCombatParamsForNpc(aiNpc)
@@ -594,13 +629,28 @@ function Shared.StartAiBehavior(aiNpc: Model, targetCastle: Model?)
 			end)
 		end
 		while root and root.Parent and humanoid and humanoid.Parent do
-			if not targetCastle or not targetCastle.Parent then
-				stopAttack()
-				return
-			end
-			if CastleHealthService.IsDestroyed(targetCastle) then
-				stopAttack()
-				return
+			if not isValidCastleTarget(targetCastle) then
+				local prev = targetCastle
+				local nextTarget = pickRandomValidCastle(prev)
+				if nextTarget then
+					stopAttack()
+					dprint(string.format(
+						"[AiNpcBehavior] %s retargeting: %s -> %s",
+						aiNpc.Name,
+						tostring(prev and prev.Name or "nil"),
+						nextTarget.Name
+					))
+					retargetTo(nextTarget)
+				else
+					-- No valid castles right now; stop and retry periodically.
+					stopAttack()
+					pcall(function()
+						humanoid.AutoRotate = true
+					end)
+					humanoid:MoveTo(root.Position)
+					task.wait(0.75)
+					continue
+				end
 			end
 
 			iterations = iterations + 1

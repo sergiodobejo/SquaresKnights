@@ -1,5 +1,5 @@
 -- StarterPlayer.StarterPlayerScripts.DefeatOverlay
--- Shows a big "You have been defeated." message when the server signals defeat.
+-- Shows match-end messages when the server signals defeat/victory.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,13 +17,38 @@ local defeatedRemote = remotesFolder:WaitForChild(RemoteNames.PlayerDefeated) ::
 local SoundCache = require(ReplicatedStorage:WaitForChild("Libs"):WaitForChild("SoundCache"))
 
 local GUI_NAME = "DefeatOverlay"
-local DEFAULT_TEXT = GuiStrings.get("DefeatOverlay_DefaultText", "You have been defeated.")
+local STR_DEFEATED = "DefeatOverlay_Defeated"
+local STR_VICTORY = "DefeatOverlay_Victory"
+local DEFAULT_TEXT = GuiStrings.get(STR_DEFEATED)
 local DEFAULT_MAX_TEXT_SIZE = 140
 
 local LOSE_SFX_ID = "rbxassetid://75759245900834"
 local WIN_SFX_ID = "rbxassetid://120357227206365"
 
 local hideToken = 0
+
+type MessagePayload = {
+	key: string,
+	args: { any }?,
+}
+
+local function resolveText(messageOrPayload: any): (string?, string?)
+	-- returns (text, key)
+	if typeof(messageOrPayload) == "table" then
+		local payload = messageOrPayload :: any
+		if type(payload.key) == "string" then
+			if type(payload.args) == "table" then
+				return GuiStrings.format(payload.key, nil, table.unpack(payload.args)), payload.key
+			end
+			return GuiStrings.get(payload.key, nil), payload.key
+		end
+	end
+	if type(messageOrPayload) == "string" and messageOrPayload ~= "" then
+		-- Backward compatibility: server may still send a literal string.
+		return messageOrPayload, nil
+	end
+	return nil, nil
+end
 
 local function ensureGui(): ScreenGui
 	local existing = playerGui:FindFirstChild(GUI_NAME)
@@ -61,23 +86,23 @@ local function ensureGui(): ScreenGui
 	return gui
 end
 
-local function show(message: string?, durationSeconds: number?)
+local function show(messageOrPayload: any, durationSeconds: number?)
 	local gui = ensureGui()
 
 	local localDefeated = player:GetAttribute("Defeated") == true
 	local localVictory = player:GetAttribute("Victory") == true
 
-	local lowerMessage = if type(message) == "string" then string.lower(message) else ""
-	local looksLikeVictoryMessage = lowerMessage:find("victory", 1, true) ~= nil
-	local looksLikeDefeatMessage = lowerMessage:find("you have been defeated", 1, true) ~= nil
+	local resolvedText, resolvedKey = resolveText(messageOrPayload)
+	local isVictoryMsg = resolvedKey == STR_VICTORY
+	local isDefeatMsg = resolvedKey == STR_DEFEATED
 
 	-- Safety: never show/announce local defeat unless the local player is actually defeated.
-	if looksLikeDefeatMessage and not localDefeated then
+	if isDefeatMsg and not localDefeated then
 		return
 	end
 
 	-- Only play match-end SFX for the local player.
-	if localVictory or looksLikeVictoryMessage then
+	if localVictory or isVictoryMsg then
 		if localVictory then
 			SoundCache.Play(WIN_SFX_ID, { parent = SoundService, poolSize = 1 })
 		end
@@ -88,7 +113,7 @@ local function show(message: string?, durationSeconds: number?)
 	local label = gui:FindFirstChild("Label")
 	if label and label:IsA("TextLabel") then
 		-- Only the defeated local player should ever see the default defeat text.
-		local text = if type(message) == "string" and message ~= "" then message else DEFAULT_TEXT
+		local text = if type(resolvedText) == "string" and resolvedText ~= "" then resolvedText else DEFAULT_TEXT
 		if text == DEFAULT_TEXT and not localDefeated then
 			return
 		end

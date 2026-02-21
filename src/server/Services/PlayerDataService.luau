@@ -2,13 +2,16 @@
 -- Minimal persistence for buffs + codes (DataStore)
 
 local DataStoreService = game:GetService("DataStoreService")
+local BadgeService = game:GetService("BadgeService")
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local BuffStateService = require(ServerScriptService.Services.BuffStateService)
 local BuffEffectService = require(ServerScriptService.Services.BuffEffectService)
 local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
+local WinsBadges = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WinsBadges"))
 
 local PlayerDataService = {}
 
@@ -25,6 +28,7 @@ end
 export type PlayerState = {
 	buffs: any,
 	codes: { [string]: boolean }?,
+	wins: number?,
 }
 
 local StateByUserId: { [number]: PlayerState } = {}
@@ -48,6 +52,14 @@ local function ensureLeaderstats(player: Player)
 		coins.Parent = leaderstats
 	end
 
+	local wins = leaderstats:FindFirstChild("Wins")
+	if not wins then
+		wins = Instance.new("IntValue")
+		wins.Name = "Wins"
+		wins.Value = 0
+		wins.Parent = leaderstats
+	end
+
 	local territory = leaderstats:FindFirstChild("Territory%")
 	if not territory then
 		territory = Instance.new("IntValue")
@@ -57,6 +69,78 @@ local function ensureLeaderstats(player: Player)
 	end
 
 	return coins :: IntValue
+end
+
+local function setLeaderstatInt(player: Player, name: string, value: number)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return
+	end
+	local inst = leaderstats:FindFirstChild(name)
+	if inst and inst:IsA("IntValue") then
+		(inst :: IntValue).Value = math.max(0, math.floor(value))
+	end
+end
+
+local function maybeAwardWinBadges(player: Player, wins: number)
+	-- Skip badge awarding in Studio to avoid noisy API errors.
+	if RunService:IsStudio() then
+		return
+	end
+	if (RuntimeSettings :: any).EnableDataStore ~= true then
+		-- In TestMode DataStore is off; wins are non-authoritative anyway.
+		return
+	end
+	if type(wins) ~= "number" or wins <= 0 then
+		return
+	end
+	if typeof(WinsBadges) ~= "table" then
+		return
+	end
+
+	-- Copy + sort descending so higher milestones are attempted first.
+	local rules = table.create(#(WinsBadges :: any))
+	for _, r in ipairs(WinsBadges :: any) do
+		table.insert(rules, r)
+	end
+	table.sort(rules, function(a: any, b: any)
+		return (a.RequiredWins or 0) > (b.RequiredWins or 0)
+	end)
+
+	for _, rule in ipairs(rules) do
+		local required = rule.RequiredWins
+		local badgeId = rule.BadgeId
+		if type(required) == "number" and type(badgeId) == "number" then
+			required = math.floor(required)
+			badgeId = math.floor(badgeId)
+			if required > 0 and badgeId > 0 and wins >= required then
+				local hasBadge = false
+				local okHas, hasOrErr = pcall(function()
+					return BadgeService:UserHasBadgeAsync(player.UserId, badgeId)
+				end)
+				if okHas and hasOrErr == true then
+					hasBadge = true
+				end
+				if not hasBadge then
+					pcall(function()
+						BadgeService:AwardBadge(player.UserId, badgeId)
+					end)
+				end
+			end
+		end
+	end
+end
+
+local function getLeaderstatInt(player: Player, name: string): number?
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return nil
+	end
+	local inst = leaderstats:FindFirstChild(name)
+	if inst and inst:IsA("IntValue") then
+		return (inst :: IntValue).Value
+	end
+	return nil
 end
 
 local function load(player: Player)
@@ -75,6 +159,7 @@ local function load(player: Player)
 		data = {
 			buffs = {},
 			codes = {},
+			wins = 0,
 		}
 	end
 
@@ -88,11 +173,18 @@ local function load(player: Player)
 	if type(data.codes) ~= "table" then
 		data.codes = {}
 	end
+	if type((data :: any).wins) ~= "number" then
+		(data :: any).wins = 0
+	end
+	(data :: any).wins = math.max(0, math.floor((data :: any).wins))
 
 	StateByUserId[userId] = data
 
 	local coinsValue = ensureLeaderstats(player)
 	coinsValue.Value = getStartingCoins()
+	local wins = (data :: any).wins
+	setLeaderstatInt(player, "Wins", wins)
+	maybeAwardWinBadges(player, wins)
 
 	BuffStateService.LoadFromState(player, data.buffs)
 
@@ -127,6 +219,10 @@ local function save(player: Player)
 	state.buffs = BuffStateService.ExportForSave(player)
 	local anyState = state :: any
 	anyState.coins = nil
+	local wins = getLeaderstatInt(player, "Wins")
+	if type(wins) == "number" then
+		anyState.wins = math.max(0, math.floor(wins))
+	end
 
 	local ok, err = pcall(function()
 		STORE:SetAsync(keyFor(userId), state)
@@ -171,6 +267,33 @@ function PlayerDataService.AddCoins(player: Player, amount: number)
 			newValue = 0
 		end
 		coinsValue.Value = newValue
+	end
+end
+
+function PlayerDataService.GetWins(player: Player): number
+	local v = getLeaderstatInt(player, "Wins")
+	if type(v) == "number" then
+		return v
+	end
+	local state = StateByUserId[player.UserId]
+	if state and type((state :: any).wins) == "number" then
+		return (state :: any).wins
+	end
+	return 0
+end
+
+function PlayerDataService.AddWin(player: Player, amount: number?)
+	local delta = if type(amount) == "number" then math.floor(amount) else 1
+	if delta <= 0 then
+		return
+	end
+
+	local newWins = PlayerDataService.GetWins(player) + delta
+	setLeaderstatInt(player, "Wins", newWins)
+
+	local state = StateByUserId[player.UserId]
+	if state then
+		(state :: any).wins = math.max(0, math.floor(newWins))
 	end
 end
 

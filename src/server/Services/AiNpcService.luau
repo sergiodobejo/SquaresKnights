@@ -11,6 +11,7 @@ local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
 
 local NpcDamagePopupService = require(ServerScriptService.Services:WaitForChild("NpcDamagePopupService"))
 local AiNpcBehaviorService = require(ServerScriptService.Services:WaitForChild("AiNpcBehaviorService"))
+local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
 
 local function getOrCreateFolder(parent: Instance, name: string): Folder
 	local existing = parent:FindFirstChild(name)
@@ -77,7 +78,12 @@ local function pickRandomCastle(): Model?
 	local castles = {}
 	for _, child in ipairs(buildingsFolder:GetChildren()) do
 		if child:IsA("Model") and string.find(child.Name, "SM_Castle_", 1, true) then
-			table.insert(castles, child)
+			local castle = child :: Model
+			-- Only pick castles that still exist and aren't destroyed.
+			-- (If health attrs aren't initialized yet, IsDestroyed() returns false.)
+			if castle.Parent ~= nil and not CastleHealthService.IsDestroyed(castle) then
+				table.insert(castles, castle)
+			end
 		end
 	end
 	
@@ -200,6 +206,14 @@ end
 
 local Shared = {}
 
+local spawnIntervalDirty = true
+Players.PlayerAdded:Connect(function()
+	spawnIntervalDirty = true
+end)
+Players.PlayerRemoving:Connect(function()
+	spawnIntervalDirty = true
+end)
+
 local function getDynamicSpawnIntervalSeconds(): number
 	local base = AiNpcConfig.SpawnIntervalSeconds
 	if type(base) ~= "number" or base ~= base or base <= 0 then
@@ -211,10 +225,29 @@ local function getDynamicSpawnIntervalSeconds(): number
 	return math.max(1, interval)
 end
 
+local function waitUntilNextSpawn(lastAttemptAt: number)
+	local targetAt = lastAttemptAt + getDynamicSpawnIntervalSeconds()
+	spawnIntervalDirty = false
+	while true do
+		if spawnIntervalDirty then
+			spawnIntervalDirty = false
+			targetAt = lastAttemptAt + getDynamicSpawnIntervalSeconds()
+		end
+
+		local remaining = targetAt - os.clock()
+		if remaining <= 0 then
+			return
+		end
+		task.wait(math.min(0.25, remaining))
+	end
+end
+
 function Shared.StartSpawning()
 	task.spawn(function()
+		local lastAttemptAt = os.clock()
 		while true do
-			task.wait(getDynamicSpawnIntervalSeconds())
+			waitUntilNextSpawn(lastAttemptAt)
+			lastAttemptAt = os.clock()
 			
 			-- Pick a random castle target
 			local targetCastle = pickRandomCastle()

@@ -12,6 +12,7 @@ local RemoteNames = require(ReplicatedStorage:WaitForChild("RemoteNames"))
 local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 local CastleHealthService = require(ServerScriptService.Services:WaitForChild("CastleHealthService"))
 local OpenArenaCornerReservationService = require(ServerScriptService.Services:WaitForChild("OpenArenaCornerReservationService"))
+local PlayerDataService = require(ServerScriptService.Services:WaitForChild("PlayerDataService"))
 
 local LOBBY_PLACE_ID = 108248113575262
 local PRE_RESULT_DELAY_SECONDS = 3
@@ -33,6 +34,12 @@ if not defeatedRemoteInst or not defeatedRemoteInst:IsA("RemoteEvent") then
 	))
 end
 local defeatedRemote = defeatedRemoteInst :: RemoteEvent
+
+-- All user-facing text must come from StarterGui/Strings via GuiStrings on the client.
+-- Server sends string keys (and optional args) only.
+local STR_DEFEATED = "DefeatOverlay_Defeated"
+local STR_VICTORY = "DefeatOverlay_Victory"
+local STR_PLAYER_DEFEATED_FMT = "DefeatOverlay_PlayerDefeatedFmt"
 
 local defeatedByUserId: { [number]: boolean } = {}
 local matchEnded = false
@@ -132,7 +139,7 @@ local function markAndHandleDefeat(player: Player)
 		end
 
 		player:SetAttribute(PLAYER_DEFEATED_ATTR, true)
-		defeatedRemote:FireClient(player, "You have been defeated.")
+		defeatedRemote:FireClient(player, { key = STR_DEFEATED })
 
 		task.delay(TELEPORT_DELAY_SECONDS, function()
 			if not player.Parent then
@@ -179,6 +186,11 @@ local function endMatchWithWinner(winner: Player, reason: string)
 
 	matchEnded = true
 
+	-- Persist win immediately so it gets saved on teleport (PlayerRemoving).
+	pcall(function()
+		PlayerDataService.AddWin(winner, 1)
+	end)
+
 	task.delay(PRE_RESULT_DELAY_SECONDS, function()
 		if not winner.Parent then
 			return
@@ -187,7 +199,7 @@ local function endMatchWithWinner(winner: Player, reason: string)
 			return
 		end
 		winner:SetAttribute(PLAYER_VICTORY_ATTR, true)
-		defeatedRemote:FireClient(winner, "Victory!")
+		defeatedRemote:FireClient(winner, { key = STR_VICTORY })
 		teleportWinnerToLobbyAfterDelay(winner)
 	end)
 
@@ -326,16 +338,31 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 	-- More than one player still alive: notify remaining players briefly.
 	if player then
 		local defeatedName = player.Name
-		local msg = string.format("%s defeated!", defeatedName)
 		for _, p in ipairs(Players:GetPlayers()) do
 			if alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
-				defeatedRemote:FireClient(p, msg, 1.5)
+				defeatedRemote:FireClient(p, { key = STR_PLAYER_DEFEATED_FMT, args = { defeatedName } }, 1.5)
 			end
 		end
 	end
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
+	-- If a player leaves mid-match (not due to defeat/victory teleports), briefly notify remaining alive players.
+	if not matchEnded and not isOpenArenaMode() then
+		local leftIsPartOfMatchFlow = player:GetAttribute(PLAYER_DEFEATED_ATTR) == true
+			or player:GetAttribute(PLAYER_VICTORY_ATTR) == true
+			or defeatedByUserId[player.UserId] == true
+		if not leftIsPartOfMatchFlow then
+			local alive = getAliveOwnerUserIds()
+			local leftName = player.Name
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= player and alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
+					defeatedRemote:FireClient(p, { key = STR_PLAYER_DEFEATED_FMT, args = { leftName } }, 1.5)
+				end
+			end
+		end
+	end
+
 	-- If a player leaves mid-match, clear their NPCs so cells are freed.
 	cleanupOwnedNpcsForUserId(player.UserId)
 
