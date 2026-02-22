@@ -58,8 +58,8 @@ end
 
 local function getLocalCoins(): number
 	local player = Players.LocalPlayer
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local coins = leaderstats and leaderstats:FindFirstChild("Coins")
+	local stats = player:FindFirstChild("Stats")
+	local coins = stats and stats:FindFirstChild("Coins")
 	if coins and coins:IsA("IntValue") then
 		return coins.Value
 	end

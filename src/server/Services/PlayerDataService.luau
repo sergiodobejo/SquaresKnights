@@ -17,6 +17,9 @@ local PlayerDataService = {}
 
 local STORE = DataStoreService:GetDataStore("PlayerDataV1")
 
+local STATS_FOLDER_NAME = "Stats"
+local COINS_VALUE_NAME = "Coins"
+
 local function getStartingCoins(): number
 	local v = (RuntimeSettings :: any).StartingCoins
 	if type(v) == "number" then
@@ -29,12 +32,37 @@ export type PlayerState = {
 	buffs: any,
 	codes: { [string]: boolean }?,
 	wins: number?,
+	castleKills: number?,
 }
 
 local StateByUserId: { [number]: PlayerState } = {}
 
 local function keyFor(userId: number): string
 	return tostring(userId)
+end
+
+local function getOrCreateFolder(parent: Instance, name: string): Folder
+	local existing = parent:FindFirstChild(name)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = name
+	folder.Parent = parent
+	return folder
+end
+
+local function ensureCoinsValue(player: Player): IntValue
+	local statsFolder = getOrCreateFolder(player, STATS_FOLDER_NAME)
+	local coins = statsFolder:FindFirstChild(COINS_VALUE_NAME)
+	if coins and coins:IsA("IntValue") then
+		return coins
+	end
+	local v = Instance.new("IntValue")
+	v.Name = COINS_VALUE_NAME
+	v.Value = 0
+	v.Parent = statsFolder
+	return v
 end
 
 local function ensureLeaderstats(player: Player)
@@ -45,12 +73,8 @@ local function ensureLeaderstats(player: Player)
 		leaderstats.Parent = player
 	end
 
-	local coins = leaderstats:FindFirstChild("Coins")
-	if not coins then
-		coins = Instance.new("IntValue")
-		coins.Name = "Coins"
-		coins.Parent = leaderstats
-	end
+	-- Coins intentionally live outside leaderstats so they don't clutter the leaderboard.
+	local coins = ensureCoinsValue(player)
 
 	local wins = leaderstats:FindFirstChild("Wins")
 	if not wins then
@@ -66,6 +90,14 @@ local function ensureLeaderstats(player: Player)
 		territory.Name = "Territory%"
 		territory.Value = 0
 		territory.Parent = leaderstats
+	end
+
+	local castleKills = leaderstats:FindFirstChild("Castle Kills")
+	if not castleKills then
+		castleKills = Instance.new("IntValue")
+		castleKills.Name = "Castle Kills"
+		castleKills.Value = 0
+		castleKills.Parent = leaderstats
 	end
 
 	return coins :: IntValue
@@ -160,6 +192,7 @@ local function load(player: Player)
 			buffs = {},
 			codes = {},
 			wins = 0,
+			castleKills = 0,
 		}
 	end
 
@@ -177,6 +210,10 @@ local function load(player: Player)
 		(data :: any).wins = 0
 	end
 	(data :: any).wins = math.max(0, math.floor((data :: any).wins))
+	if type((data :: any).castleKills) ~= "number" then
+		(data :: any).castleKills = 0
+	end
+	(data :: any).castleKills = math.max(0, math.floor((data :: any).castleKills))
 
 	StateByUserId[userId] = data
 
@@ -185,6 +222,9 @@ local function load(player: Player)
 	local wins = (data :: any).wins
 	setLeaderstatInt(player, "Wins", wins)
 	maybeAwardWinBadges(player, wins)
+
+	local castleKills = (data :: any).castleKills
+	setLeaderstatInt(player, "Castle Kills", castleKills)
 
 	BuffStateService.LoadFromState(player, data.buffs)
 
@@ -223,6 +263,10 @@ local function save(player: Player)
 	if type(wins) == "number" then
 		anyState.wins = math.max(0, math.floor(wins))
 	end
+	local castleKills = getLeaderstatInt(player, "Castle Kills")
+	if type(castleKills) == "number" then
+		anyState.castleKills = math.max(0, math.floor(castleKills))
+	end
 
 	local ok, err = pcall(function()
 		STORE:SetAsync(keyFor(userId), state)
@@ -259,8 +303,7 @@ function PlayerDataService.MarkCodeRedeemed(player: Player, code: string)
 end
 
 function PlayerDataService.AddCoins(player: Player, amount: number)
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local coinsValue = leaderstats and leaderstats:FindFirstChild("Coins")
+	local coinsValue = ensureCoinsValue(player)
 	if coinsValue and coinsValue:IsA("IntValue") then
 		local newValue = coinsValue.Value + math.floor(amount)
 		if newValue < 0 then
@@ -297,9 +340,36 @@ function PlayerDataService.AddWin(player: Player, amount: number?)
 	end
 end
 
+function PlayerDataService.GetCastleKills(player: Player): number
+	local v = getLeaderstatInt(player, "Castle Kills")
+	if type(v) == "number" then
+		return v
+	end
+	local state = StateByUserId[player.UserId]
+	if state and type((state :: any).castleKills) == "number" then
+		return (state :: any).castleKills
+	end
+	return 0
+end
+
+function PlayerDataService.AddCastleKill(player: Player, amount: number?)
+	local delta = if type(amount) == "number" then math.floor(amount) else 1
+	if delta <= 0 then
+		return
+	end
+
+	local newKills = PlayerDataService.GetCastleKills(player) + delta
+	setLeaderstatInt(player, "Castle Kills", newKills)
+
+	local state = StateByUserId[player.UserId]
+	if state then
+		(state :: any).castleKills = math.max(0, math.floor(newKills))
+	end
+end
+
 function PlayerDataService.GetCoins(player: Player): number
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local coinsValue = leaderstats and leaderstats:FindFirstChild("Coins")
+	local statsFolder = player:FindFirstChild(STATS_FOLDER_NAME)
+	local coinsValue = statsFolder and statsFolder:FindFirstChild(COINS_VALUE_NAME)
 	if coinsValue and coinsValue:IsA("IntValue") then
 		return coinsValue.Value
 	end

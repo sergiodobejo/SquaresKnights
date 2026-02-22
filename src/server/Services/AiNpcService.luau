@@ -68,7 +68,7 @@ local function _getCastleForPlayer(player: Player): Model?
 	return nil
 end
 
-local function pickRandomCastle(): Model?
+local function _pickRandomCastle(): Model?
 	-- Find a random player's castle from workspace.PlayerBuildings
 	local buildingsFolder = workspace:FindFirstChild("PlayerBuildings")
 	if not buildingsFolder then
@@ -93,6 +93,45 @@ local function pickRandomCastle(): Model?
 	return castles[math.random(1, #castles)]
 end
 
+local function listAliveCastles(): { Model }
+	local buildingsFolder = workspace:FindFirstChild("PlayerBuildings")
+	if not buildingsFolder then
+		return {}
+	end
+
+	local castles = {}
+	for _, child in ipairs(buildingsFolder:GetChildren()) do
+		if child:IsA("Model") and string.find(child.Name, "SM_Castle_", 1, true) then
+			local castle = child :: Model
+			if castle.Parent ~= nil and not CastleHealthService.IsDestroyed(castle) then
+				table.insert(castles, castle)
+			end
+		end
+	end
+	return castles
+end
+
+local function pickNearestCastleToPosition(worldPos: Vector3): Model?
+	local castles = listAliveCastles()
+	if #castles == 0 then
+		return nil
+	end
+
+	local bestCastle: Model? = nil
+	local bestDistSq = math.huge
+	for _, castle in ipairs(castles) do
+		local pivotPos = (castle :: Model):GetPivot().Position
+		local d = pivotPos - worldPos
+		local distSq = d.X * d.X + d.Y * d.Y + d.Z * d.Z
+		if distSq < bestDistSq then
+			bestDistSq = distSq
+			bestCastle = castle
+		end
+	end
+
+	return bestCastle
+end
+
 local function _getBaseplateCenter(): Vector3?
 	local baseplate = GridCells.FindBaseplate()
 	if not baseplate then
@@ -101,8 +140,17 @@ local function _getBaseplateCenter(): Vector3?
 	return baseplate.Position
 end
 
-local AI_SPAWN_SPREAD_STUDS = 20
+local AI_SPAWN_SPREAD_STUDS_DEFAULT = 20
+local AI_SPAWN_SPREAD_STUDS_MULTIPLAYER = 63
 local AI_SPAWN_HEIGHT_ABOVE_GROUND = 6.2
+
+local function getDynamicSpawnSpreadStuds(): number
+	local playerCount = #Players:GetPlayers()
+	if playerCount > 1 then
+		return AI_SPAWN_SPREAD_STUDS_MULTIPLAYER
+	end
+	return AI_SPAWN_SPREAD_STUDS_DEFAULT
+end
 
 local function getGroundPositionAt(worldXZ: Vector3, ignoreInstances: { Instance }): Vector3
 	local rayOrigin = worldXZ + Vector3.new(0, 120, 0)
@@ -118,10 +166,10 @@ local function getGroundPositionAt(worldXZ: Vector3, ignoreInstances: { Instance
 end
 
 -- Create a spawned AI NPC clone with proper setup
-local function spawnAiNpc(npcTemplate: Model, baseplate: BasePart): Model?
+local function spawnAiNpc(npcTemplate: Model, baseplate: BasePart, spawnSpreadStuds: number): Model?
 	-- Spawn near the baseplate center with a random 2D offset.
 	local angle = math.random() * math.pi * 2
-	local radius = math.sqrt(math.random()) * AI_SPAWN_SPREAD_STUDS
+	local radius = math.sqrt(math.random()) * spawnSpreadStuds
 	local offsetLocal = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
 	local offsetWorld = baseplate.CFrame:VectorToWorldSpace(offsetLocal)
 	local spawnXZ = baseplate.Position + offsetWorld
@@ -248,11 +296,10 @@ function Shared.StartSpawning()
 		while true do
 			waitUntilNextSpawn(lastAttemptAt)
 			lastAttemptAt = os.clock()
-			
-			-- Pick a random castle target
-			local targetCastle = pickRandomCastle()
-			if not targetCastle then
-				-- warn("[AiNpcService] No castles found yet")
+
+			-- Only spawn if there is at least one alive castle.
+			-- Target selection happens after spawn so we can pick the nearest castle to the NPC.
+			if #listAliveCastles() == 0 then
 				continue
 			end
 			
@@ -270,9 +317,14 @@ function Shared.StartSpawning()
 				continue
 			end
 			
-			local npc = spawnAiNpc(template, baseplate)
+			local npc = spawnAiNpc(template, baseplate, getDynamicSpawnSpreadStuds())
 			if npc then
 				print(string.format("[AiNpcService] Spawned AI NPC: %s", modelName))
+				local targetCastle = pickNearestCastleToPosition((npc :: Model):GetPivot().Position)
+				if not targetCastle then
+					npc:Destroy()
+					continue
+				end
 				-- Start AI behavior: walk to target castle and prepare to attack
 				task.spawn(function()
 					AiNpcBehaviorService.StartAiBehavior(npc, targetCastle)

@@ -18,6 +18,7 @@ local PlayerDataService = require(ServerScriptService.Services:WaitForChild("Pla
 local WarriorValueService = require(ServerScriptService.Services:WaitForChild("WarriorValueService"))
 local TeamTextures = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("TeamTextures"))
 local GridCells = require(ReplicatedStorage:WaitForChild("GridCells"))
+local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 
 local BASEPLATE_NAME = "Baseplate"
 local BUILDINGS_FOLDER_NAME = "Buildings"
@@ -36,16 +37,16 @@ local CORNER_ID_ATTRIBUTE = "CornerId" -- 1..4, used for baseplate corner placem
 local OPEN_ARENA_START_COINS_APPLIED_ATTRIBUTE = "OpenArenaStartCoinsApplied"
 
 local function waitForCoinsValue(player: Player): IntValue?
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if not leaderstats then
-		leaderstats = player:WaitForChild("leaderstats", 5)
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		stats = player:WaitForChild("Stats", 5)
 	end
-	if not (leaderstats and leaderstats:IsA("Folder")) then
+	if not (stats and stats:IsA("Folder")) then
 		return nil
 	end
-	local coins = leaderstats:FindFirstChild("Coins")
+	local coins = stats:FindFirstChild("Coins")
 	if not coins then
-		coins = leaderstats:WaitForChild("Coins", 5)
+		coins = stats:WaitForChild("Coins", 5)
 	end
 	if coins and coins:IsA("IntValue") then
 		return coins
@@ -281,6 +282,74 @@ local blockedCellKeysByUserId: { [number]: { string } } = {}
 local CASTLE_BLOCK_INSET_CELLS = 0
 local CASTLE_BLOCK_SIZE_CELLS = 2
 
+local OPEN_ARENA_CASTLE_CLEAR_RADIUS_CELLS = 4
+local LIVE_NPC_FOLDER_NAME = "LiveNPC"
+
+local function getHumanoid(model: Model): Humanoid?
+	local h = model:FindFirstChildOfClass("Humanoid")
+	if h then
+		return h
+	end
+	local maybe = model:FindFirstChild("Humanoid")
+	if maybe and maybe:IsA("Humanoid") then
+		return maybe
+	end
+	return nil
+end
+
+local function clearForeignNpcsNearCastleOpenArena(player: Player, baseplate: BasePart, ixMin: number, ixMax: number, izMin: number, izMax: number)
+	if not OpenArenaCornerReservationService.IsActive() then
+		return
+	end
+
+	local liveNpcFolder = workspace:FindFirstChild(LIVE_NPC_FOLDER_NAME)
+	if not (liveNpcFolder and liveNpcFolder:IsA("Folder")) then
+		return
+	end
+
+	local minIx = ixMin - OPEN_ARENA_CASTLE_CLEAR_RADIUS_CELLS
+	local maxIx = ixMax + OPEN_ARENA_CASTLE_CLEAR_RADIUS_CELLS
+	local minIz = izMin - OPEN_ARENA_CASTLE_CLEAR_RADIUS_CELLS
+	local maxIz = izMax + OPEN_ARENA_CASTLE_CLEAR_RADIUS_CELLS
+
+	-- Clamp to baseplate bounds.
+	local cellsX, cellsZ = GridCells.GetCellCounts(baseplate)
+	if cellsX <= 0 or cellsZ <= 0 then
+		return
+	end
+	minIx = math.clamp(minIx, 0, cellsX - 1)
+	maxIx = math.clamp(maxIx, 0, cellsX - 1)
+	minIz = math.clamp(minIz, 0, cellsZ - 1)
+	maxIz = math.clamp(maxIz, 0, cellsZ - 1)
+
+	for _, inst in ipairs(liveNpcFolder:GetChildren()) do
+		if inst:IsA("Model") then
+			local npc: Model = inst
+			local ownerUserId = Affiliation.GetOwnerUserIdFromModel(npc)
+			if ownerUserId ~= player.UserId then
+				local key = npc:GetAttribute("CellKey")
+				local ix, iz = GridCells.ParseCellKey(key)
+				if ix ~= nil and iz ~= nil then
+					if ix >= minIx and ix <= maxIx and iz >= minIz and iz <= maxIz then
+						-- Kill/destroy so GridCellOccupancyService frees the cell via Died/AncestryChanged.
+						local humanoid = getHumanoid(npc)
+						if humanoid then
+							pcall(function()
+								humanoid.Health = 0
+							end)
+						end
+						if npc.Parent ~= nil then
+							pcall(function()
+								npc:Destroy()
+							end)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 local function unblockCastleCellsForUserId(userId: number)
 	local keys = blockedCellKeysByUserId[userId]
 	if not keys then
@@ -461,6 +530,9 @@ local function ensureCastleForPlayer(player: Player)
 	end)
 
 	blockCastleCellsForPlayer(player, baseplate, cornerId)
+
+	-- Open Arena fairness: ensure new castles aren't instantly boxed in by previously-spawned enemy NPCs.
+	clearForeignNpcsNearCastleOpenArena(player, baseplate, ixMin, ixMax, izMin, izMax)
 
 	if OpenArenaCornerReservationService.IsActive() then
 		OpenArenaCornerReservationService.ApplyReservations(baseplate, occupiedCornerIds)

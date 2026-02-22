@@ -44,8 +44,27 @@ local STR_PLAYER_DEFEATED_FMT = "DefeatOverlay_PlayerDefeatedFmt"
 local defeatedByUserId: { [number]: boolean } = {}
 local matchEnded = false
 
+-- Cache names so we can still broadcast a defeat even if the player leaves quickly.
+local playerNameByUserId: { [number]: string } = {}
+
+local function cachePlayerName(player: Player)
+	pcall(function()
+		if player and player:IsA("Player") then
+			local name = player.Name
+			if type(name) == "string" and name ~= "" then
+				playerNameByUserId[player.UserId] = name
+			end
+		end
+	end)
+end
+
+Players.PlayerAdded:Connect(cachePlayerName)
+for _, p in ipairs(Players:GetPlayers()) do
+	cachePlayerName(p)
+end
+
 local TERRITORY_VALUE_NAME = "Territory%"
-local OPEN_ARENA_WIN_TERRITORY_PCT = 70
+local OPEN_ARENA_WIN_TERRITORY_PCT = 51
 
 local function getAliveOwnerUserIds(): { [number]: boolean }
 	local alive: { [number]: boolean } = {}
@@ -230,6 +249,39 @@ local function getTerritoryPct(player: Player): number
 	return 0
 end
 
+local function broadcastPlayerDefeatedToAlive(defeatedName: string, alive: { [number]: boolean }, durationSeconds: number?)
+	if type(defeatedName) ~= "string" or defeatedName == "" then
+		return
+	end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
+			defeatedRemote:FireClient(p, { key = STR_PLAYER_DEFEATED_FMT, args = { defeatedName } }, durationSeconds)
+		end
+	end
+end
+
+-- Ensure we never miss (or double-send) the "player defeated" announcement.
+local announcedDefeatByUserId: { [number]: boolean } = {}
+
+local function announceDefeatOnce(userId: number, defeatedName: string, alive: { [number]: boolean }, durationSeconds: number?)
+	if type(userId) ~= "number" or userId <= 0 then
+		return
+	end
+	if announcedDefeatByUserId[userId] then
+		return
+	end
+	announcedDefeatByUserId[userId] = true
+	broadcastPlayerDefeatedToAlive(defeatedName, alive, durationSeconds)
+end
+
+local function getCachedNameForUserId(userId: number): string
+	local name = playerNameByUserId[userId]
+	if type(name) == "string" and name ~= "" then
+		return name
+	end
+	return "Player_" .. tostring(userId)
+end
+
 local territoryWatcherByUserId: { [number]: boolean } = {}
 local function attachTerritoryWatcher(player: Player)
 	if territoryWatcherByUserId[player.UserId] then
@@ -261,7 +313,7 @@ local function attachTerritoryWatcher(player: Player)
 			end
 			local pct = getTerritoryPct(player)
 			if type(pct) == "number" and pct >= OPEN_ARENA_WIN_TERRITORY_PCT then
-				endMatchWithWinner(player, "territory_70")
+				endMatchWithWinner(player, "territory_51")
 			end
 		end
 
@@ -291,12 +343,31 @@ for _, p in ipairs(Players:GetPlayers()) do
 	attachTerritoryWatcher(p)
 end
 
-CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: number, _teamId: number)
+CastleHealthService.OnCastleDestroyed(function(castle: Model, ownerUserId: number, _teamId: number)
 	if type(ownerUserId) ~= "number" or ownerUserId <= 0 then
 		return
 	end
+
+	-- Castle kill credit: if a player-owned NPC was the last to damage this castle, award them a kill.
+	local killerUserId = 0
+	pcall(function()
+		local v = castle:GetAttribute("LastDamagedByUserId")
+		if type(v) == "number" then
+			killerUserId = math.floor(v)
+		end
+	end)
+	if killerUserId > 0 and killerUserId ~= ownerUserId then
+		local killer = Players:GetPlayerByUserId(killerUserId)
+		if killer then
+			pcall(function()
+				PlayerDataService.AddCastleKill(killer, 1)
+			end)
+		end
+	end
+
 	local player = Players:GetPlayerByUserId(ownerUserId)
 	if player then
+		cachePlayerName(player)
 		if player:GetAttribute(PLAYER_DEFEATED_ATTR) == true or defeatedByUserId[player.UserId] then
 			return
 		end
@@ -313,12 +384,11 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 		return
 	end
 
-	if aliveCount == 1 then
-		if isOpenArenaMode() then
-			-- In OpenArena, destroying enemy castles never grants victory.
-			return
-		end
+	-- Notify remaining alive players who got defeated.
+	local defeatedName = if player then player.Name else getCachedNameForUserId(ownerUserId)
+	announceDefeatOnce(ownerUserId, defeatedName, alive, 1.5)
 
+	if aliveCount == 1 then
 		local winnerUserId = getOnlyAliveOwnerUserId(alive)
 		if winnerUserId <= 0 then
 			return
@@ -331,35 +401,25 @@ CastleHealthService.OnCastleDestroyed(function(_castle: Model, ownerUserId: numb
 			return
 		end
 
+		if isOpenArenaMode() then
+			-- In OpenArena, destroying enemy castles never grants victory.
+			return
+		end
+
 		endMatchWithWinner(winner, "last_castle")
 		return
 	end
 
-	-- More than one player still alive: notify remaining players briefly.
-	if player then
-		local defeatedName = player.Name
-		for _, p in ipairs(Players:GetPlayers()) do
-			if alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
-				defeatedRemote:FireClient(p, { key = STR_PLAYER_DEFEATED_FMT, args = { defeatedName } }, 1.5)
-			end
-		end
-	end
+	-- More than one player still alive: already notified above.
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	-- If a player leaves mid-match (not due to defeat/victory teleports), briefly notify remaining alive players.
-	if not matchEnded and not isOpenArenaMode() then
-		local leftIsPartOfMatchFlow = player:GetAttribute(PLAYER_DEFEATED_ATTR) == true
-			or player:GetAttribute(PLAYER_VICTORY_ATTR) == true
-			or defeatedByUserId[player.UserId] == true
-		if not leftIsPartOfMatchFlow then
+	if not matchEnded then
+		-- Treat leaving as elimination. Skip only for the winner teleport.
+		if player:GetAttribute(PLAYER_VICTORY_ATTR) ~= true then
 			local alive = getAliveOwnerUserIds()
-			local leftName = player.Name
-			for _, p in ipairs(Players:GetPlayers()) do
-				if p ~= player and alive[p.UserId] and p:GetAttribute(PLAYER_DEFEATED_ATTR) ~= true then
-					defeatedRemote:FireClient(p, { key = STR_PLAYER_DEFEATED_FMT, args = { leftName } }, 1.5)
-				end
-			end
+			announceDefeatOnce(player.UserId, player.Name, alive, 1.5)
 		end
 	end
 
@@ -390,4 +450,5 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	end)
 	defeatedByUserId[player.UserId] = nil
 	territoryWatcherByUserId[player.UserId] = nil
+	announcedDefeatByUserId[player.UserId] = nil
 end)

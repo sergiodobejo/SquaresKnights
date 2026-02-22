@@ -26,6 +26,10 @@ local Shared = {}
 
 local active = false
 
+-- Determine the server's mode from TeleportData (EntryType) of the first player who joined.
+-- This avoids racy "#Players == 1" checks while still preventing late/mixed-mode activation.
+local serverEntryType: EntryType.EntryType? = nil
+
 -- cornerId -> teamColorName
 local reservedColorByCornerId: { [number]: string } = {}
 
@@ -116,6 +120,18 @@ local function clearReservationForCorner(cornerId: number)
 	end
 end
 
+do
+	local function onPlayerAdded(player: Player)
+		if serverEntryType == nil then
+			serverEntryType = getEntryTypeForPlayer(player)
+		end
+	end
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	for _, p in ipairs(Players:GetPlayers()) do
+		onPlayerAdded(p)
+	end
+end
+
 local function ensureReservationForCorner(baseplate: BasePart, cornerId: number, teamColorName: string)
 	if reservedCellKeysByCornerId[cornerId] == nil then
 		local keys = computeCellKeysForCorner(baseplate, cornerId)
@@ -142,8 +158,11 @@ function Shared.MaybeActivateForFirstPlayer(player: Player, baseplate: BasePart,
 		return
 	end
 
-	-- Only activate for the very first player in the server.
-	if #Players:GetPlayers() ~= 1 then
+	-- Only activate in servers whose first-join EntryType is Open Arena.
+	if serverEntryType == nil then
+		serverEntryType = getEntryTypeForPlayer(player)
+	end
+	if serverEntryType ~= "Open Arena" then
 		return
 	end
 

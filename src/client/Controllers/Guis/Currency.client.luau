@@ -25,8 +25,8 @@ local function format(n: number)
 end
 
 local function bindCoins()
-	local leaderstats = Player:WaitForChild("leaderstats")
-	local coins = leaderstats:WaitForChild("Coins")
+	local stats = Player:WaitForChild("Stats")
+	local coins = stats:WaitForChild("Coins")
 
 	local function update()
 		CoinsAmount.Text = format(coins.Value)

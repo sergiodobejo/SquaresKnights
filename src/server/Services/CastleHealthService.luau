@@ -3,6 +3,9 @@
 
 local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Affiliation = require(ReplicatedStorage:WaitForChild("Affiliation"))
 
 local HEALTH_ATTR = "Health"
 local MAX_HEALTH_ATTR = "MaxHealth"
@@ -10,6 +13,8 @@ local DESTROYED_ATTR = "Destroyed"
 
 local TEAM_ID_ATTR = "TeamId"
 local OWNER_USER_ID_ATTR = "OwnerUserId"
+
+local LAST_DAMAGED_BY_USER_ID_ATTR = "LastDamagedByUserId"
 
 local GUI_NAME = "CastleHealthBillboard"
 
@@ -295,6 +300,7 @@ function Shared.InitCastle(castle: Model, teamId: number?, ownerUserId: number?,
 		end
 	end
 	castle:SetAttribute(DESTROYED_ATTR, false)
+	castle:SetAttribute(LAST_DAMAGED_BY_USER_ID_ATTR, 0)
 
 	local adornee = getAnyBasePart(castle)
 	if adornee then
@@ -332,7 +338,7 @@ function Shared.InitCastle(castle: Model, teamId: number?, ownerUserId: number?,
 	end))
 end
 
-function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boolean
+function Shared.ApplyDamage(castle: Model, amount: number, source: Model?): boolean
 	if not castle or not castle.Parent then
 		return false
 	end
@@ -348,6 +354,25 @@ function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boo
 		castle:SetAttribute("LastDamagedServerTime", workspace:GetServerTimeNow())
 	end)
 
+	-- Track who last damaged this castle.
+	-- IMPORTANT: Only player-owned NPCs count. If AI/neutral (OwnerUserId=0) damages the castle,
+	-- we clear the attribute so a previous player hit doesn't incorrectly get credited.
+	local ownerUserId = Shared.GetOwnerUserId(castle)
+	local attackerUserId = 0
+	if source and source:IsA("Model") then
+		attackerUserId = Affiliation.GetOwnerUserIdFromModel(source)
+	end
+	local creditedUserId = 0
+	if attackerUserId > 0 and attackerUserId ~= ownerUserId then
+		creditedUserId = attackerUserId
+	end
+	local prev = castle:GetAttribute(LAST_DAMAGED_BY_USER_ID_ATTR)
+	if prev ~= creditedUserId then
+		pcall(function()
+			castle:SetAttribute(LAST_DAMAGED_BY_USER_ID_ATTR, creditedUserId)
+		end)
+	end
+
 	local maxHealth = Shared.GetMaxHealth(castle)
 	local cur = Shared.GetHealth(castle)
 	local nextHealth = clampHealth(cur - amount, maxHealth)
@@ -356,11 +381,11 @@ function Shared.ApplyDamage(castle: Model, amount: number, _source: Model?): boo
 	if nextHealth <= 0 then
 		castle:SetAttribute(DESTROYED_ATTR, true)
 		playCastleDestroyedSfx(castle)
-		local ownerUserId = Shared.GetOwnerUserId(castle)
+		local castleOwnerUserId = Shared.GetOwnerUserId(castle)
 		local teamId = Shared.GetCastleTeamId(castle)
 		-- Fire after marking destroyed but before model destruction.
 		task.defer(function()
-			castleDestroyedBindable:Fire(castle, ownerUserId, teamId)
+			castleDestroyedBindable:Fire(castle, castleOwnerUserId, teamId)
 		end)
 		-- Destroy the model; CastleSpawnOnJoin listens for removal to unblock grid.
 		task.defer(function()
