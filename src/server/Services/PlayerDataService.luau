@@ -12,6 +12,7 @@ local BuffStateService = require(ServerScriptService.Services.BuffStateService)
 local BuffEffectService = require(ServerScriptService.Services.BuffEffectService)
 local RuntimeSettings = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("RuntimeSettings"))
 local WinsBadges = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("WinsBadges"))
+local CastleKillsBadges = require(ReplicatedStorage:WaitForChild("Configs"):WaitForChild("CastleKillsBadges"))
 
 local PlayerDataService = {}
 
@@ -163,6 +164,55 @@ local function maybeAwardWinBadges(player: Player, wins: number)
 	end
 end
 
+local function maybeAwardCastleKillsBadges(player: Player, castleKills: number)
+	-- Skip badge awarding in Studio to avoid noisy API errors.
+	if RunService:IsStudio() then
+		return
+	end
+	if (RuntimeSettings :: any).EnableDataStore ~= true then
+		-- In TestMode DataStore is off; stats are non-authoritative anyway.
+		return
+	end
+	if type(castleKills) ~= "number" or castleKills <= 0 then
+		return
+	end
+	if typeof(CastleKillsBadges) ~= "table" then
+		return
+	end
+
+	-- Copy + sort descending so higher milestones are attempted first.
+	local rules = table.create(#(CastleKillsBadges :: any))
+	for _, r in ipairs(CastleKillsBadges :: any) do
+		table.insert(rules, r)
+	end
+	table.sort(rules, function(a: any, b: any)
+		return (a.RequiredCastleKills or 0) > (b.RequiredCastleKills or 0)
+	end)
+
+	for _, rule in ipairs(rules) do
+		local required = rule.RequiredCastleKills
+		local badgeId = rule.BadgeId
+		if type(required) == "number" and type(badgeId) == "number" then
+			required = math.floor(required)
+			badgeId = math.floor(badgeId)
+			if required > 0 and badgeId > 0 and castleKills >= required then
+				local hasBadge = false
+				local okHas, hasOrErr = pcall(function()
+					return BadgeService:UserHasBadgeAsync(player.UserId, badgeId)
+				end)
+				if okHas and hasOrErr == true then
+					hasBadge = true
+				end
+				if not hasBadge then
+					pcall(function()
+						BadgeService:AwardBadge(player.UserId, badgeId)
+					end)
+				end
+			end
+		end
+	end
+end
+
 local function getLeaderstatInt(player: Player, name: string): number?
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then
@@ -225,6 +275,7 @@ local function load(player: Player)
 
 	local castleKills = (data :: any).castleKills
 	setLeaderstatInt(player, "Castle Kills", castleKills)
+	maybeAwardCastleKillsBadges(player, castleKills)
 
 	BuffStateService.LoadFromState(player, data.buffs)
 
@@ -360,6 +411,7 @@ function PlayerDataService.AddCastleKill(player: Player, amount: number?)
 
 	local newKills = PlayerDataService.GetCastleKills(player) + delta
 	setLeaderstatInt(player, "Castle Kills", newKills)
+	maybeAwardCastleKillsBadges(player, newKills)
 
 	local state = StateByUserId[player.UserId]
 	if state then
